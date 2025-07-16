@@ -170,6 +170,58 @@ def api_login():
     else:
         return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
 
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+    
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        
+        # Validation
+        if not username or not password:
+            return render_template_string(REGISTER_TEMPLATE, error='Username and password are required')
+        
+        if len(username) < 3:
+            return render_template_string(REGISTER_TEMPLATE, error='Username must be at least 3 characters')
+        
+        if len(password) < 6:
+            return render_template_string(REGISTER_TEMPLATE, error='Password must be at least 6 characters')
+        
+        if password != confirm_password:
+            return render_template_string(REGISTER_TEMPLATE, error='Passwords do not match')
+        
+        # Check if username already exists
+        conn = get_db_connection()
+        existing_user = conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
+        conn.close()
+        
+        if existing_user:
+            return render_template_string(REGISTER_TEMPLATE, error='Username already taken')
+        
+        # Create new user
+        try:
+            conn = get_db_connection()
+            password_hash = generate_password_hash(password)
+            cursor = conn.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', 
+                                 (username, password_hash))
+            user_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            
+            # Auto-login after registration
+            session['user_id'] = user_id
+            session['username'] = username
+            session.permanent = True
+            
+            return redirect(url_for('dashboard'))
+        except Exception as e:
+            return render_template_string(REGISTER_TEMPLATE, error='Registration failed. Please try again.')
+    
+    return render_template_string(REGISTER_TEMPLATE)
+
 @app.route('/logout')
 def logout():
     session.clear()
@@ -468,7 +520,8 @@ LOGIN_TEMPLATE = '''
         </form>
 
         <div class="info">
-            Default credentials: admin / admin123
+            Default credentials: admin / admin123<br>
+            <a href="{{ url_for('register') }}" style="color: #667eea;">Create new account</a>
         </div>
     </div>
 </body>
