@@ -10,14 +10,6 @@ from functools import wraps
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
-# Initialize database when app starts
-def create_app():
-    init_db()
-    return app
-
-# Initialize database immediately
-init_db()
-
 # Database setup
 def init_db():
     conn = sqlite3.connect('users.db')
@@ -282,3 +274,10 @@ if __name__ == '__main__':
     
     # Run the app
     app.run(debug=True, host='0.0.0.0', port=port)
+
+# Initialize database when app starts (for production)
+try:
+    init_db()
+except Exception as e:
+    print(f"Database initialization error: {e}")
+    # Database will be initialized on first connection attempt
