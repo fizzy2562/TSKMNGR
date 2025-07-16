@@ -11,6 +11,8 @@ from functools import wraps
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 print("SECRET_KEY loaded is:", app.secret_key)
+# Ensure DB is initialized on startup
+init_db()
 
 # Database setup
 def init_db():
