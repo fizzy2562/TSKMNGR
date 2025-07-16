@@ -5,8 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TSKMNGR - Login</title>
     <style>
-        /* --- Your full CSS remains unchanged --- */
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -16,6 +20,7 @@
             justify-content: center;
             padding: 20px;
         }
+
         .login-container {
             background: white;
             border-radius: 20px;
@@ -26,6 +31,7 @@
             position: relative;
             overflow: hidden;
         }
+
         .login-container::before {
             content: '';
             position: absolute;
@@ -35,47 +41,118 @@
             height: 4px;
             background: linear-gradient(90deg, #667eea, #764ba2);
         }
-        .logo { text-align: center; margin-bottom: 30px; }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
         .logo h1 {
-            color: #333; font-size: 2.5rem; font-weight: 700; letter-spacing: -2px; margin-bottom: 8px;
+            color: #333;
+            font-size: 2.5rem;
+            font-weight: 700;
+            letter-spacing: -2px;
+            margin-bottom: 8px;
         }
-        .logo p { color: #666; font-size: 0.9rem; opacity: 0.8; }
-        .form-group { margin-bottom: 25px; position: relative; }
+
+        .logo p {
+            color: #666;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+            position: relative;
+        }
+
         .form-group label {
-            display: block; color: #333; font-weight: 500; margin-bottom: 8px; font-size: 0.9rem;
+            display: block;
+            color: #333;
+            font-weight: 500;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
         }
+
         .form-group input {
-            width: 100%; padding: 15px 20px; border: 2px solid #e1e5e9;
-            border-radius: 12px; font-size: 1rem; transition: all 0.3s ease; background: #f8f9fa;
+            width: 100%;
+            padding: 15px 20px;
+            border: 2px solid #e1e5e9;
+            border-radius: 12px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            background: #f8f9fa;
         }
+
         .form-group input:focus {
-            outline: none; border-color: #667eea; background: white;
+            outline: none;
+            border-color: #667eea;
+            background: white;
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
-        .form-group input::placeholder { color: #adb5bd; }
-        .login-btn {
-            width: 100%; padding: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white; border: none; border-radius: 12px; font-size: 1rem;
-            font-weight: 600; cursor: pointer; transition: all 0.3s ease;
-            position: relative; overflow: hidden;
+
+        .form-group input::placeholder {
+            color: #adb5bd;
         }
+
+        .login-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
         .login-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
         }
-        .login-btn:active { transform: translateY(0); }
+
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
         .login-btn::after {
-            content: ''; position: absolute; top: 50%; left: 50%; width: 0; height: 0;
-            background: rgba(255, 255, 255, 0.2); border-radius: 50%;
-            transform: translate(-50%, -50%); transition: width 0.6s, height 0.6s;
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
         }
-        .login-btn:active::after { width: 300px; height: 300px; }
-        .forgot-password { text-align: center; margin-top: 20px; }
+
+        .login-btn:active::after {
+            width: 300px;
+            height: 300px;
+        }
+
+        .forgot-password {
+            text-align: center;
+            margin-top: 20px;
+        }
+
         .forgot-password a {
-            color: #667eea; text-decoration: none; font-size: 0.9rem; transition: color 0.3s ease;
+            color: #667eea;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.3s ease;
         }
-        .forgot-password a:hover { color: #764ba2; }
+
+        .forgot-password a:hover {
+            color: #764ba2;
+        }
+
         .error-message {
             background: #fee;
             color: #d63384;
@@ -84,8 +161,9 @@
             margin-bottom: 20px;
             font-size: 0.9rem;
             border: 1px solid #f8d7da;
-            display: {% if error %}block{% else %}none{% endif %};
+            display: none;
         }
+
         .success-message {
             background: #d4edda;
             color: #155724;
@@ -96,25 +174,39 @@
             border: 1px solid #c3e6cb;
             display: none;
         }
+
         .loading {
             position: relative;
             pointer-events: none;
         }
+
         .loading::before {
             content: '';
             position: absolute;
-            top: 50%; left: 50%; width: 20px; height: 20px;
-            margin: -10px 0 0 -10px; border: 2px solid transparent;
-            border-top: 2px solid white; border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            border: 2px solid transparent;
+            border-top: 2px solid white;
+            border-radius: 50%;
             animation: spin 1s linear infinite;
         }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
         @media (max-width: 480px) {
-            .login-container { padding: 30px 20px; }
-            .logo h1 { font-size: 2rem; }
+            .login-container {
+                padding: 30px 20px;
+            }
+
+            .logo h1 {
+                font-size: 2rem;
+            }
         }
     </style>
 </head>
@@ -124,24 +216,153 @@
             <h1>TSKMNGR</h1>
             <p>Task Management System</p>
         </div>
-        <div id="errorMessage" class="error-message">{% if error %}{{ error }}{% endif %}</div>
+
+        <div id="errorMessage" class="error-message"></div>
         <div id="successMessage" class="success-message"></div>
-        <form id="loginForm" method="post" action="/login" autocomplete="on">
+
+        <form id="loginForm">
             <div class="form-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" placeholder="Enter your username" required>
             </div>
+
             <div class="form-group">
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" placeholder="Enter your password" required>
             </div>
+
             <button type="submit" class="login-btn" id="loginBtn">
                 <span id="btnText">Sign In</span>
             </button>
         </form>
+
         <div class="forgot-password">
-            <a href="#" id="forgotPasswordLink" onclick="alert('Default credentials: admin / admin123')">Forgot your password?</a>
+            <a href="#" id="forgotPasswordLink">Forgot your password?</a>
         </div>
     </div>
+
+    <script>
+        // Demo credentials for testing
+        const DEMO_CREDENTIALS = {
+            username: 'admin',
+            password: 'admin123'
+        };
+
+        // DOM elements
+        const loginForm = document.getElementById('loginForm');
+        const loginBtn = document.getElementById('loginBtn');
+        const btnText = document.getElementById('btnText');
+        const errorMessage = document.getElementById('errorMessage');
+        const successMessage = document.getElementById('successMessage');
+        const forgotPasswordLink = document.getElementById('forgotPasswordLink');
+
+        // Show/hide messages
+        function showMessage(element, message) {
+            element.textContent = message;
+            element.style.display = 'block';
+            setTimeout(() => {
+                element.style.display = 'none';
+            }, 5000);
+        }
+
+        function hideMessages() {
+            errorMessage.style.display = 'none';
+            successMessage.style.display = 'none';
+        }
+
+        // Handle form submission
+        loginForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            hideMessages();
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            // Show loading state
+            loginBtn.classList.add('loading');
+            btnText.textContent = 'Signing In...';
+            loginBtn.disabled = true;
+
+            try {
+                // Make actual API call to Flask backend
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    // Store token if provided
+                    if (data.token) {
+                        localStorage.setItem('authToken', data.token);
+                    }
+                    
+                    showMessage(successMessage, 'Login successful! Redirecting...');
+                    
+                    // Redirect to dashboard
+                    setTimeout(() => {
+                        window.location.href = '/dashboard';
+                    }, 1500);
+                } else {
+                    showMessage(errorMessage, data.message || 'Login failed. Please try again.');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                showMessage(errorMessage, 'Network error. Please check your connection and try again.');
+            }
+
+            // Reset button state
+            loginBtn.classList.remove('loading');
+            btnText.textContent = 'Sign In';
+            loginBtn.disabled = false;
+        });
+
+        // Handle forgot password
+        forgotPasswordLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            alert('Password reset functionality would be implemented here.\nFor demo: username="admin", password="admin123"');
+        });
+
+        // Add enter key support for password field
+        document.getElementById('password').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                loginForm.dispatchEvent(new Event('submit'));
+            }
+        });
+
+        // Real-world implementation would replace the demo authentication with:
+        /*
+        async function authenticateUser(username, password) {
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Store JWT token or session
+                    localStorage.setItem('authToken', data.token);
+                    return { success: true };
+                } else {
+                    return { success: false, message: data.message };
+                }
+            } catch (error) {
+                return { success: false, message: 'Network error. Please try again.' };
+            }
+        }
+        */
+    </script>
 </body>
 </html>
