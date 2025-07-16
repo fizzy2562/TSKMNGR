@@ -10,6 +10,14 @@ from functools import wraps
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
+# Initialize database when app starts
+def create_app():
+    init_db()
+    return app
+
+# Initialize database immediately
+init_db()
+
 # Database setup
 def init_db():
     conn = sqlite3.connect('users.db')
@@ -34,6 +42,10 @@ def init_db():
     conn.close()
 
 def get_db_connection():
+    # Ensure database exists before connecting
+    if not os.path.exists('users.db'):
+        init_db()
+    
     conn = sqlite3.connect('users.db')
     conn.row_factory = sqlite3.Row
     return conn
@@ -75,17 +87,23 @@ def login_required(f):
 
 # User authentication functions
 def authenticate_user(username, password):
-    conn = get_db_connection()
-    user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
-    conn.close()
-    
-    if user and check_password_hash(user['password_hash'], password):
-        return user
-    return None
+    try:
+        conn = get_db_connection()
+        user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+        conn.close()
+        
+        if user and check_password_hash(user['password_hash'], password):
+            return user
+        return None
+    except Exception as e:
+        print(f"Authentication error: {e}")
+        # Try to reinitialize database if there's an error
+        init_db()
+        return None
 
 def create_user(username, password):
-    conn = get_db_connection()
     try:
+        conn = get_db_connection()
         password_hash = generate_password_hash(password)
         cursor = conn.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', 
                              (username, password_hash))
@@ -94,7 +112,11 @@ def create_user(username, password):
         conn.close()
         return user_id
     except sqlite3.IntegrityError:
-        conn.close()
+        return None
+    except Exception as e:
+        print(f"User creation error: {e}")
+        # Try to reinitialize database if there's an error
+        init_db()
         return None
 
 # Routes
