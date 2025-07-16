@@ -10,6 +10,13 @@ from functools import wraps
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
+# Session configuration
+app.config['SESSION_PERMANENT'] = False
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
+app.config['SESSION_COOKIE_SECURE'] = True  # Use HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent XSS
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
 # Database setup
 def init_db():
     conn = sqlite3.connect('users.db')
@@ -63,6 +70,11 @@ def verify_token(token):
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # Check session first
+        if 'user_id' in session and session.get('user_id'):
+            return f(*args, **kwargs)
+        
+        # Check Authorization header for API requests
         token = request.headers.get('Authorization')
         if token:
             token = token.replace('Bearer ', '')
@@ -70,10 +82,11 @@ def login_required(f):
             if user_id:
                 return f(*args, **kwargs)
         
-        # Check session for web interface
-        if 'user_id' in session:
-            return f(*args, **kwargs)
+        # If it's an API request, return JSON error
+        if request.is_json or request.path.startswith('/api/'):
+            return jsonify({'error': 'Authentication required'}), 401
         
+        # Otherwise redirect to login
         return redirect(url_for('login'))
     return decorated_function
 
@@ -120,6 +133,10 @@ def index():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # If user is already logged in, redirect to dashboard
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+    
     if request.method == 'POST':
         if request.is_json:
             # API endpoint for AJAX requests
@@ -129,13 +146,17 @@ def login():
             
             user = authenticate_user(username, password)
             if user:
-                token = generate_token(user['id'])
+                # Set session data
                 session['user_id'] = user['id']
                 session['username'] = user['username']
+                session.permanent = True  # Make session permanent
+                
+                token = generate_token(user['id'])
                 return jsonify({
                     'success': True,
                     'token': token,
-                    'message': 'Login successful'
+                    'message': 'Login successful',
+                    'redirect': '/dashboard'
                 })
             else:
                 return jsonify({
@@ -151,6 +172,7 @@ def login():
             if user:
                 session['user_id'] = user['id']
                 session['username'] = user['username']
+                session.permanent = True  # Make session permanent
                 return redirect(url_for('dashboard'))
             else:
                 return render_template('login.html', error='Invalid username or password')
@@ -213,12 +235,34 @@ def logout():
 @login_required
 def dashboard():
     # This would be your main task manager interface
+    user_id = session.get('user_id')
+    username = session.get('username', 'User')
+    
     return f"""
-    <h1>Welcome to TSKMNGR Dashboard</h1>
-    <p>Hello, {session.get('username', 'User')}!</p>
-    <a href="/logout">Logout</a>
-    <br><br>
-    <p>Your task manager interface would go here.</p>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>TSKMNGR Dashboard</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }}
+            .header {{ background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; }}
+            .logout-btn {{ background: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Welcome to TSKMNGR Dashboard</h1>
+            <p>Hello, {username}! (User ID: {user_id})</p>
+            <a href="/logout" class="logout-btn">Logout</a>
+        </div>
+        
+        <div>
+            <h2>Your Task Manager</h2>
+            <p>Your task manager interface would go here.</p>
+            <p>Session data: {dict(session)}</p>
+        </div>
+    </body>
+    </html>
     """
 
 @app.route('/api/user')
