@@ -5,14 +5,10 @@ import secrets
 from datetime import datetime, timedelta
 import jwt
 import os
-import traceback
 from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
-print("SECRET_KEY loaded is:", app.secret_key)
-# Ensure DB is initialized on startup
-init_db()
 
 # Database setup
 def init_db():
@@ -26,12 +22,14 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
     # Create default admin user if it doesn't exist
     cursor.execute('SELECT id FROM users WHERE username = ?', ('admin',))
     if not cursor.fetchone():
         admin_password = generate_password_hash('admin123')
         cursor.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', 
                       ('admin', admin_password))
+    
     conn.commit()
     conn.close()
 
@@ -67,9 +65,11 @@ def login_required(f):
             user_id = verify_token(token)
             if user_id:
                 return f(*args, **kwargs)
+        
         # Check session for web interface
         if 'user_id' in session:
             return f(*args, **kwargs)
+        
         return redirect(url_for('login'))
     return decorated_function
 
@@ -78,6 +78,7 @@ def authenticate_user(username, password):
     conn = get_db_connection()
     user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
     conn.close()
+    
     if user and check_password_hash(user['password_hash'], password):
         return user
     return None
@@ -105,41 +106,52 @@ def index():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    try:
-        if request.method == 'POST':
-            print("POST data:", request.form)
-            # Support both JSON and form submissions
-            if request.is_json:
-                data = request.get_json()
-                username = data.get('username')
-                password = data.get('password')
+    if request.method == 'POST':
+        if request.is_json:
+            # API endpoint for AJAX requests
+            data = request.get_json()
+            username = data.get('username')
+            password = data.get('password')
+            
+            user = authenticate_user(username, password)
+            if user:
+                token = generate_token(user['id'])
+                session['user_id'] = user['id']
+                session['username'] = user['username']
+                return jsonify({
+                    'success': True,
+                    'token': token,
+                    'message': 'Login successful'
+                })
             else:
-                username = request.form.get('username')
-                password = request.form.get('password')
-            print(f"Login attempt. Username: {username}")
-
+                return jsonify({
+                    'success': False,
+                    'message': 'Invalid username or password'
+                }), 401
+        else:
+            # Form submission
+            username = request.form['username']
+            password = request.form['password']
+            
             user = authenticate_user(username, password)
             if user:
                 session['user_id'] = user['id']
                 session['username'] = user['username']
-                print(f"Login success for user {username}")
                 return redirect(url_for('dashboard'))
             else:
-                print("Invalid username or password")
                 return render_template('login.html', error='Invalid username or password')
-        return render_template('login.html')
-    except Exception as e:
-        print("Exception in /login:", e)
-        print(traceback.format_exc())
-        return "Error: " + str(e), 500
+    
+    return render_template('login.html')
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
+    
     if not username or not password:
         return jsonify({'success': False, 'message': 'Username and password required'}), 400
+    
     user = authenticate_user(username, password)
     if user:
         token = generate_token(user['id'])
@@ -160,10 +172,13 @@ def register():
         data = request.get_json()
         username = data.get('username')
         password = data.get('password')
+        
         if not username or not password:
             return jsonify({'success': False, 'message': 'Username and password required'}), 400
+        
         if len(password) < 6:
             return jsonify({'success': False, 'message': 'Password must be at least 6 characters'}), 400
+        
         user_id = create_user(username, password)
         if user_id:
             token = generate_token(user_id)
@@ -183,6 +198,7 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
+    # This would be your main task manager interface
     return f"""
     <h1>Welcome to TSKMNGR Dashboard</h1>
     <p>Hello, {session.get('username', 'User')}!</p>
@@ -217,9 +233,9 @@ LOGIN_TEMPLATE = '''
     {% if error %}
         <div class="error">{{ error }}</div>
     {% endif %}
-    <form method="post" action="/login">
-        <input type="text" name="username" placeholder="Username" required autocomplete="username">
-        <input type="password" name="password" placeholder="Password" required autocomplete="current-password">
+    <form method="post">
+        <input type="text" name="username" placeholder="Username" required>
+        <input type="password" name="password" placeholder="Password" required>
         <button type="submit">Login</button>
     </form>
     <p>Default credentials: admin / admin123</p>
@@ -229,13 +245,18 @@ LOGIN_TEMPLATE = '''
 
 if __name__ == '__main__':
     # Create templates directory and login.html if they don't exist
+    import os
     if not os.path.exists('templates'):
         os.makedirs('templates')
+    
     with open('templates/login.html', 'w') as f:
         f.write(LOGIN_TEMPLATE)
+    
     # Initialize database
     init_db()
+    
     # Get port from environment variable (for Render deployment)
     port = int(os.environ.get('PORT', 5000))
+    
     # Run the app
     app.run(debug=True, host='0.0.0.0', port=port)
