@@ -164,7 +164,7 @@ LOGIN_TEMPLATE = '''
         </form>
 
         <div class="info">
-            Default credentials: admin / admin123<br>
+           
             <a href="{{ url_for('register') }}" style="color: #667eea;">Create new account</a>
         </div>
     </div>
