@@ -6,7 +6,7 @@ from contextlib import contextmanager
 import logging
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class Database:
@@ -17,7 +17,15 @@ class Database:
         Args:
             db_path (str): Path to the SQLite database file
         """
-        self.db_path = db_path
+        # Ensure the database path is absolute
+        self.db_path = os.path.abspath(db_path)
+        logger.info(f"Database path: {self.db_path}")
+        
+        # Create directory if it doesn't exist
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir)
+        
         self.init_db()
     
     @contextmanager
@@ -44,54 +52,64 @@ class Database:
     
     def init_db(self):
         """Initialize the database with required tables."""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Users table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Boards table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS boards (
-                    id TEXT PRIMARY KEY,
-                    user_id INTEGER NOT NULL,
-                    header TEXT NOT NULL,
-                    position INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-                )
-            ''')
-            
-            # Tasks table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    board_id TEXT NOT NULL,
-                    task TEXT NOT NULL,
-                    due_date DATE NOT NULL,
-                    notes TEXT DEFAULT '',
-                    is_completed BOOLEAN DEFAULT 0,
-                    completed_on DATE,
-                    position INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (board_id) REFERENCES boards (id) ON DELETE CASCADE
-                )
-            ''')
-            
-            # Create indexes for better performance
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_boards_user_id ON boards(user_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(is_completed)')
-            
-            conn.commit()
-            logger.info("Database initialized successfully")
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Users table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                # Boards table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS boards (
+                        id TEXT PRIMARY KEY,
+                        user_id INTEGER NOT NULL,
+                        header TEXT NOT NULL,
+                        position INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                    )
+                ''')
+                
+                # Tasks table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS tasks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        board_id TEXT NOT NULL,
+                        task TEXT NOT NULL,
+                        due_date DATE NOT NULL,
+                        notes TEXT DEFAULT '',
+                        is_completed BOOLEAN DEFAULT 0,
+                        completed_on DATE,
+                        position INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (board_id) REFERENCES boards (id) ON DELETE CASCADE
+                    )
+                ''')
+                
+                # Create indexes for better performance
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_boards_user_id ON boards(user_id)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(is_completed)')
+                
+                conn.commit()
+                logger.info("Database initialized successfully")
+                
+                # Test database functionality
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = [row[0] for row in cursor.fetchall()]
+                logger.info(f"Database tables created: {tables}")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}")
+            raise
     
     # User methods
     def create_user(self, username, password):
@@ -106,9 +124,13 @@ class Database:
             int: User ID if successful, None if username already exists
         """
         try:
+            logger.debug(f"Attempting to create user: {username}")
+            
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 password_hash = generate_password_hash(password)
+                logger.debug(f"Password hashed for user: {username}")
+                
                 cursor.execute(
                     'INSERT INTO users (username, password_hash) VALUES (?, ?)', 
                     (username, password_hash)
@@ -116,14 +138,25 @@ class Database:
                 user_id = cursor.lastrowid
                 conn.commit()
                 logger.info(f"Created user: {username} with ID: {user_id}")
+                
+                # Verify user was created
+                cursor.execute('SELECT COUNT(*) FROM users WHERE id = ?', (user_id,))
+                count = cursor.fetchone()[0]
+                logger.debug(f"User verification count: {count}")
             
             # Create default board for new user
             import uuid
-            self.create_board(user_id, "Your Tasks", str(uuid.uuid4()))
+            board_id = str(uuid.uuid4())
+            logger.debug(f"Creating default board for user {user_id} with ID: {board_id}")
+            self.create_board(user_id, "Your Tasks", board_id)
             
             return user_id
+            
         except sqlite3.IntegrityError as e:
-            logger.warning(f"Failed to create user {username}: {e}")
+            logger.warning(f"Failed to create user {username} - integrity error: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error creating user {username}: {e}")
             return None
     
     def authenticate_user(self, username, password):
@@ -210,23 +243,35 @@ class Database:
             header (str): Board title/header
             board_id (str): Unique board identifier
         """
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            # Get the next position
-            cursor.execute(
-                'SELECT MAX(position) as max_pos FROM boards WHERE user_id = ?',
-                (user_id,)
-            )
-            result = cursor.fetchone()
-            max_pos = result['max_pos'] if result['max_pos'] is not None else 0
-            position = max_pos + 1
+        try:
+            logger.debug(f"Creating board '{header}' for user {user_id} with ID: {board_id}")
             
-            cursor.execute(
-                'INSERT INTO boards (id, user_id, header, position) VALUES (?, ?, ?, ?)',
-                (board_id, user_id, header, position)
-            )
-            conn.commit()
-            logger.info(f"Created board '{header}' for user {user_id}")
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Get the next position
+                cursor.execute(
+                    'SELECT MAX(position) as max_pos FROM boards WHERE user_id = ?',
+                    (user_id,)
+                )
+                result = cursor.fetchone()
+                max_pos = result['max_pos'] if result['max_pos'] is not None else 0
+                position = max_pos + 1
+                
+                cursor.execute(
+                    'INSERT INTO boards (id, user_id, header, position) VALUES (?, ?, ?, ?)',
+                    (board_id, user_id, header, position)
+                )
+                conn.commit()
+                logger.info(f"Created board '{header}' for user {user_id}")
+                
+                # Verify board was created
+                cursor.execute('SELECT COUNT(*) FROM boards WHERE id = ?', (board_id,))
+                count = cursor.fetchone()[0]
+                logger.debug(f"Board verification count: {count}")
+                
+        except Exception as e:
+            logger.error(f"Failed to create board '{header}' for user {user_id}: {e}")
+            raise
     
     def update_board_header(self, board_id, user_id, new_header):
         """
@@ -304,44 +349,59 @@ class Database:
             due_date (str): Due date in YYYY-MM-DD format
             notes (str): Optional notes
         """
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            # Verify user owns the board
-            cursor.execute(
-                'SELECT id FROM boards WHERE id = ? AND user_id = ?',
-                (board_id, user_id)
-            )
-            board = cursor.fetchone()
+        try:
+            logger.debug(f"Adding task '{task}' to board {board_id} for user {user_id}")
             
-            if board:
-                # Count active tasks
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Verify user owns the board
                 cursor.execute(
-                    'SELECT COUNT(*) as count FROM tasks WHERE board_id = ? AND is_completed = 0',
-                    (board_id,)
+                    'SELECT id FROM boards WHERE id = ? AND user_id = ?',
+                    (board_id, user_id)
                 )
-                active_count = cursor.fetchone()['count']
+                board = cursor.fetchone()
                 
-                if active_count < 10:  # Limit of 10 active tasks
-                    # Get next position
+                if board:
+                    # Count active tasks
                     cursor.execute(
-                        'SELECT MAX(position) as max_pos FROM tasks WHERE board_id = ? AND is_completed = 0',
+                        'SELECT COUNT(*) as count FROM tasks WHERE board_id = ? AND is_completed = 0',
                         (board_id,)
                     )
-                    result = cursor.fetchone()
-                    max_pos = result['max_pos'] if result['max_pos'] is not None else 0
-                    position = max_pos + 1
+                    active_count = cursor.fetchone()['count']
+                    logger.debug(f"Current active tasks in board {board_id}: {active_count}")
                     
-                    cursor.execute(
-                        '''INSERT INTO tasks (board_id, task, due_date, notes, position) 
-                           VALUES (?, ?, ?, ?, ?)''',
-                        (board_id, task, due_date, notes, position)
-                    )
-                    conn.commit()
-                    logger.info(f"Added task '{task}' to board {board_id}")
+                    if active_count < 10:  # Limit of 10 active tasks
+                        # Get next position
+                        cursor.execute(
+                            'SELECT MAX(position) as max_pos FROM tasks WHERE board_id = ? AND is_completed = 0',
+                            (board_id,)
+                        )
+                        result = cursor.fetchone()
+                        max_pos = result['max_pos'] if result['max_pos'] is not None else 0
+                        position = max_pos + 1
+                        
+                        cursor.execute(
+                            '''INSERT INTO tasks (board_id, task, due_date, notes, position) 
+                               VALUES (?, ?, ?, ?, ?)''',
+                            (board_id, task, due_date, notes, position)
+                        )
+                        task_id = cursor.lastrowid
+                        conn.commit()
+                        logger.info(f"Added task '{task}' to board {board_id} with ID: {task_id}")
+                        
+                        # Verify task was created
+                        cursor.execute('SELECT COUNT(*) FROM tasks WHERE id = ?', (task_id,))
+                        count = cursor.fetchone()[0]
+                        logger.debug(f"Task verification count: {count}")
+                        
+                    else:
+                        logger.warning(f"Cannot add task - board {board_id} has maximum active tasks")
                 else:
-                    logger.warning(f"Cannot add task - board {board_id} has maximum active tasks")
-            else:
-                logger.error(f"Board {board_id} not found or user {user_id} doesn't own it")
+                    logger.error(f"Board {board_id} not found or user {user_id} doesn't own it")
+                    
+        except Exception as e:
+            logger.error(f"Failed to add task '{task}' to board {board_id}: {e}")
+            raise
     
     def update_task(self, board_id, user_id, task_idx, new_task, new_date, new_notes):
         """
@@ -504,3 +564,86 @@ class Database:
             conn.commit()
             logger.info(f"Cleaned up {deleted_count} old completed tasks")
             return deleted_count
+
+    def debug_database_state(self):
+        """
+        Debug method to check the current state of the database.
+        Useful for troubleshooting.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                logger.info("=== DATABASE DEBUG INFO ===")
+                logger.info(f"Database file: {self.db_path}")
+                logger.info(f"Database exists: {os.path.exists(self.db_path)}")
+                
+                if os.path.exists(self.db_path):
+                    logger.info(f"Database size: {os.path.getsize(self.db_path)} bytes")
+                
+                # Check tables
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = [row[0] for row in cursor.fetchall()]
+                logger.info(f"Tables: {tables}")
+                
+                # Check users
+                cursor.execute('SELECT COUNT(*) FROM users')
+                user_count = cursor.fetchone()[0]
+                logger.info(f"Total users: {user_count}")
+                
+                if user_count > 0:
+                    cursor.execute('SELECT id, username, created_at FROM users ORDER BY id')
+                    users = cursor.fetchall()
+                    for user in users:
+                        logger.info(f"User: ID={user[0]}, Username={user[1]}, Created={user[2]}")
+                
+                # Check boards
+                cursor.execute('SELECT COUNT(*) FROM boards')
+                board_count = cursor.fetchone()[0]
+                logger.info(f"Total boards: {board_count}")
+                
+                if board_count > 0:
+                    cursor.execute('SELECT id, user_id, header FROM boards ORDER BY user_id')
+                    boards = cursor.fetchall()
+                    for board in boards:
+                        logger.info(f"Board: ID={board[0]}, UserID={board[1]}, Header={board[2]}")
+                
+                # Check tasks
+                cursor.execute('SELECT COUNT(*) FROM tasks')
+                task_count = cursor.fetchone()[0]
+                logger.info(f"Total tasks: {task_count}")
+                
+                if task_count > 0:
+                    cursor.execute('SELECT id, board_id, task, is_completed FROM tasks ORDER BY board_id')
+                    tasks = cursor.fetchall()
+                    for task in tasks:
+                        logger.info(f"Task: ID={task[0]}, BoardID={task[1]}, Task={task[2]}, Completed={task[3]}")
+                
+                logger.info("=== END DEBUG INFO ===")
+                
+        except Exception as e:
+            logger.error(f"Error during debug: {e}")
+
+    def check_database_permissions(self):
+        """
+        Check if we have proper read/write permissions for the database.
+        """
+        try:
+            # Check if we can write to the directory
+            db_dir = os.path.dirname(self.db_path) or '.'
+            if not os.access(db_dir, os.W_OK):
+                logger.error(f"No write permission for directory: {db_dir}")
+                return False
+            
+            # Check if database file exists and is writable
+            if os.path.exists(self.db_path):
+                if not os.access(self.db_path, os.R_OK | os.W_OK):
+                    logger.error(f"No read/write permission for database file: {self.db_path}")
+                    return False
+            
+            logger.info("Database permissions check passed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking database permissions: {e}")
+            return False
