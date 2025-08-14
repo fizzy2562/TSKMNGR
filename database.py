@@ -99,7 +99,7 @@ class Database:
                     
                     # Test database functionality
                     cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
-                    tables = [row[0] for row in cursor.fetchall()]
+                    tables = [row['table_name'] for row in cursor.fetchall()]
                     logger.info(f"Database tables created: {tables}")
                     
         except Exception as e:
@@ -575,12 +575,12 @@ class Database:
                     
                     # Check database version
                     cursor.execute('SELECT version()')
-                    version = cursor.fetchone()[0]
+                    version = cursor.fetchone()['version']
                     logger.info(f"PostgreSQL version: {version}")
                     
                     # Check tables
                     cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
-                    tables = [row[0] for row in cursor.fetchall()]
+                    tables = [row['table_name'] for row in cursor.fetchall()]
                     logger.info(f"Tables: {tables}")
                     
                     # Check users
