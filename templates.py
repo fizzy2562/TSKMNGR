@@ -479,6 +479,23 @@ DASHBOARD_TEMPLATE = """
             align-items: center;
             justify-content: center;
         }
+        .screenshot-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 4px;
+        }
+        .screenshot-btn:hover {
+            background: #0056b3;
+        }
         .add-board-container {
             display: flex;
             justify-content: center;
@@ -636,7 +653,7 @@ DASHBOARD_TEMPLATE = """
     <div class="main-container">
         <div class="boards-grid">
             {% for board_id, board in boards.items() %}
-            <div class="board-container">
+            <div class="board-container" data-board-id="{{ board_id }}">
                 <div class="board-header">
                     {% if request.args.get('edit_header') == board_id %}
                     <form method="post" action="{{ url_for('edit_header', board_id=board_id) }}" class="header-edit-form">
@@ -650,6 +667,7 @@ DASHBOARD_TEMPLATE = """
                         <a href="?edit_header={{ board_id }}">
                             <button type="button" class="edit-header-btn" title="Edit header">✎</button>
                         </a>
+                        <button type="button" class="screenshot-btn" title="Take screenshot" onclick="takeScreenshot('{{ board_id }}')">📷</button>
                         {% if boards|length > 1 %}
                         <form method="post" action="{{ url_for('remove_board', board_id=board_id) }}" style="margin:0;">
                             <button type="submit" class="remove-board" title="Remove board" onclick="return confirm('Remove this board?')">×</button>
@@ -739,6 +757,100 @@ DASHBOARD_TEMPLATE = """
         </div>
         {% endif %}
     </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script>
+        async function takeScreenshot(boardId) {
+            try {
+                // Find the specific board container
+                const boardElement = document.querySelector(`[data-board-id="${boardId}"]`);
+                
+                if (!boardElement) {
+                    alert('Board not found for screenshot');
+                    return;
+                }
+
+                // Show loading message
+                const loadingMsg = document.createElement('div');
+                loadingMsg.innerHTML = '📷 Taking screenshot...';
+                loadingMsg.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: #007bff;
+                    color: white;
+                    padding: 10px 15px;
+                    border-radius: 6px;
+                    z-index: 1000;
+                    font-size: 14px;
+                `;
+                document.body.appendChild(loadingMsg);
+
+                // Configure html2canvas options
+                const canvas = await html2canvas(boardElement, {
+                    backgroundColor: '#ffffff',
+                    scale: 2, // Higher quality
+                    useCORS: true,
+                    allowTaint: true,
+                    scrollX: 0,
+                    scrollY: 0,
+                    width: boardElement.offsetWidth,
+                    height: boardElement.offsetHeight
+                });
+
+                // Remove loading message
+                document.body.removeChild(loadingMsg);
+
+                // Get board title for filename
+                const boardTitle = boardElement.querySelector('.board-title')?.textContent || 'Board';
+                const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+                const filename = `${boardTitle.replace(/[^a-zA-Z0-9]/g, '_')}_${timestamp}.png`;
+
+                // Convert canvas to blob and download
+                canvas.toBlob((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    
+                    // Show success message
+                    showNotification('📷 Screenshot saved!', 'success');
+                }, 'image/png');
+
+            } catch (error) {
+                console.error('Screenshot failed:', error);
+                showNotification('❌ Screenshot failed. Please try again.', 'error');
+            }
+        }
+
+        function showNotification(message, type) {
+            const notification = document.createElement('div');
+            notification.innerHTML = message;
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${type === 'success' ? '#28a745' : '#dc3545'};
+                color: white;
+                padding: 12px 18px;
+                border-radius: 6px;
+                z-index: 1000;
+                font-size: 14px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            `;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    document.body.removeChild(notification);
+                }
+            }, 3000);
+        }
+    </script>
 </body>
 </html>
 """
