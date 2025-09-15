@@ -214,6 +214,7 @@ class Database:
                     
                     for task in tasks:
                         task_data = {
+                            'id': task['id'],
                             'task': task['task'],
                             'date': task['due_date'].strftime('%Y-%m-%d') if hasattr(task['due_date'], 'strftime') else str(task['due_date']),
                             'notes': task['notes'] or ''
@@ -465,14 +466,14 @@ class Database:
                 else:
                     logger.error(f"Task at index {task_idx} not found in board {board_id}")
     
-    def uncomplete_task(self, board_id, user_id, task_idx):
+    def uncomplete_task(self, board_id, user_id, task_id):
         """
         Mark a completed task as active again.
         
         Args:
             board_id (str): The board ID
             user_id (int): The user ID (for security)
-            task_idx (int): Task index in the completed tasks list
+            task_id (int): The specific task ID to uncomplete
         """
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
@@ -484,26 +485,24 @@ class Database:
                 active_count = cursor.fetchone()['count']
                 
                 if active_count < 10:
-                    # Get the completed task at the specified index
+                    # Verify the task exists, is completed, and belongs to the user's board
                     cursor.execute(
                         '''SELECT t.id FROM tasks t 
                            JOIN boards b ON t.board_id = b.id 
-                           WHERE b.id = %s AND b.user_id = %s AND t.is_completed = TRUE 
-                           ORDER BY t.completed_on DESC, t.created_at DESC 
-                           LIMIT 1 OFFSET %s''',
-                        (board_id, user_id, task_idx)
+                           WHERE t.id = %s AND b.id = %s AND b.user_id = %s AND t.is_completed = TRUE''',
+                        (task_id, board_id, user_id)
                     )
                     task = cursor.fetchone()
                     
                     if task:
                         cursor.execute(
                             'UPDATE tasks SET is_completed = FALSE, completed_on = NULL WHERE id = %s',
-                            (task['id'],)
+                            (task_id,)
                         )
                         conn.commit()
-                        logger.info(f"Uncompleted task {task['id']} in board {board_id}")
+                        logger.info(f"Uncompleted task {task_id} in board {board_id}")
                     else:
-                        logger.error(f"Completed task at index {task_idx} not found in board {board_id}")
+                        logger.error(f"Completed task {task_id} not found or not accessible in board {board_id}")
                 else:
                     logger.warning(f"Cannot uncomplete task - board {board_id} has maximum active tasks")
     

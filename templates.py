@@ -752,7 +752,7 @@ DASHBOARD_TEMPLATE = """
                             <div class="completed-date">Completed: {{ task['completed_on'] }}</div>
                         </div>
                         <div class="task-actions">
-                            <form method="post" action="{{ url_for('uncomplete', board_id=board_id, task_idx=loop.index0) }}" style="margin:0;">
+                            <form method="post" action="{{ url_for('uncomplete', board_id=board_id, task_id=task.id) }}" style="margin:0;">
                                 <button type="submit" class="uncomplete">Undo</button>
                             </form>
                         </div>

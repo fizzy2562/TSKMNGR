@@ -200,11 +200,11 @@ def complete(board_id, task_idx):
     db.complete_task(board_id, user_id, task_idx)
     return redirect(url_for("dashboard"))
 
-@app.route("/uncomplete/<board_id>/<int:task_idx>", methods=["POST"])
+@app.route("/uncomplete/<board_id>/<int:task_id>", methods=["POST"])
 @login_required
-def uncomplete(board_id, task_idx):
+def uncomplete(board_id, task_id):
     user_id = session.get('user_id')
-    db.uncomplete_task(board_id, user_id, task_idx)
+    db.uncomplete_task(board_id, user_id, task_id)
     return redirect(url_for("dashboard"))
 
 if __name__ == "__main__":
