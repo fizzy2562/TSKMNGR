@@ -1,6 +1,10 @@
-# TSKMNGR - Task Manager Web Application
-
-A simple, elegant task management web application built with Flask and PostgreSQL. Create boards, manage tasks, and track your productivity with an intuitive web interface.
+<div align="center">
+  <img src="logo.png" alt="TSKMNGR Logo" width="200"/>
+  
+  # TSKMNGR - Task Manager Web Application
+  
+  A simple, elegant task management web application built with Flask and PostgreSQL. Create boards, manage tasks, and track your productivity with an intuitive web interface.
+</div>
 
 ## Screenshots
 
