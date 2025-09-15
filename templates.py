@@ -5,6 +5,9 @@ LOGIN_TEMPLATE = '''
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TSKMNGR - Login</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon-32.png') }}" sizes="32x32">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon-16.png') }}" sizes="16x16">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.png') }}">
     <style>
         * {
             margin: 0;
@@ -179,6 +182,9 @@ REGISTER_TEMPLATE = '''
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TSKMNGR - Register</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon-32.png') }}" sizes="32x32">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon-16.png') }}" sizes="16x16">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.png') }}">
     <style>
         * {
             margin: 0;
@@ -378,6 +384,9 @@ DASHBOARD_TEMPLATE = """
 <html>
 <head>
     <title>TSKMNGR - {{ username }}'s Tasks</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon-32.png') }}" sizes="32x32">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon-16.png') }}" sizes="16x16">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.png') }}">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <style>
         body { 
