@@ -94,6 +94,11 @@ class Database:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id)')
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(is_completed)')
                     
+                    # High-performance composite indexes for faster queries
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_completed ON tasks(board_id, is_completed)')
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_position ON tasks(board_id, position)')
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_completed_position ON tasks(board_id, is_completed, position)')
+                    
                     conn.commit()
                     logger.info("Database initialized successfully")
                     
