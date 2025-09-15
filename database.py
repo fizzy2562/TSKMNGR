@@ -11,6 +11,9 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(leve
 logger = logging.getLogger(__name__)
 
 class Database:
+    # Feature flag for performance optimizations
+    USE_OPTIMIZED_QUERIES = False  # Set to True to enable JOIN optimization
+    
     def __init__(self):
         """
         Initialize the PostgreSQL database connection using Neon.
@@ -95,9 +98,13 @@ class Database:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(is_completed)')
                     
                     # High-performance composite indexes for faster queries
+                    logger.info("Creating performance indexes...")
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_completed ON tasks(board_id, is_completed)')
+                    logger.info("Created index: idx_tasks_board_completed")
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_position ON tasks(board_id, position)')
+                    logger.info("Created index: idx_tasks_board_position") 
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_completed_position ON tasks(board_id, is_completed, position)')
+                    logger.info("Created index: idx_tasks_board_completed_position")
                     
                     conn.commit()
                     logger.info("Database initialized successfully")
@@ -186,12 +193,25 @@ class Database:
     def get_user_boards(self, user_id):
         """
         Get all boards and their tasks for a specific user.
+        Uses feature flag to switch between original and optimized implementations.
         
         Args:
             user_id (int): The user ID
             
         Returns:
             dict: Dictionary of boards with their tasks
+        """
+        if self.USE_OPTIMIZED_QUERIES:
+            logger.info("Using optimized JOIN query for get_user_boards")
+            return self.get_user_boards_optimized(user_id)
+        else:
+            logger.info("Using original query method for get_user_boards")
+            return self.get_user_boards_original(user_id)
+    
+    def get_user_boards_original(self, user_id):
+        """
+        BACKUP VERSION: Original implementation with separate queries.
+        This is kept as a fallback in case the optimized version has issues.
         """
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
@@ -234,7 +254,68 @@ class Database:
                     result[board['id']] = board_data
         
         return result
-    
+
+    def get_user_boards_optimized(self, user_id):
+        """
+        OPTIMIZED VERSION: Single JOIN query for better performance.
+        Reduces database round trips from N+1 queries to just 1 query.
+        """
+        with self.get_connection() as conn:
+            with conn.cursor() as cursor:
+                # Single query to get all boards and their tasks
+                cursor.execute('''
+                    SELECT 
+                        b.id as board_id,
+                        b.header as board_header,
+                        b.position as board_position,
+                        b.created_at as board_created_at,
+                        t.id as task_id,
+                        t.task as task_name,
+                        t.due_date as task_due_date,
+                        t.notes as task_notes,
+                        t.is_completed,
+                        t.completed_on,
+                        t.position as task_position,
+                        t.created_at as task_created_at
+                    FROM boards b
+                    LEFT JOIN tasks t ON b.id = t.board_id
+                    WHERE b.user_id = %s
+                    ORDER BY b.position, b.created_at, t.is_completed, t.position, t.created_at
+                ''', (user_id,))
+                
+                rows = cursor.fetchall()
+                
+                result = {}
+                current_board_id = None
+                
+                for row in rows:
+                    board_id = row['board_id']
+                    
+                    # Initialize new board
+                    if board_id not in result:
+                        result[board_id] = {
+                            'header': row['board_header'],
+                            'active': [],
+                            'completed': []
+                        }
+                    
+                    # Add task if it exists (LEFT JOIN can have NULL tasks for empty boards)
+                    if row['task_id'] is not None:
+                        task_data = {
+                            'id': row['task_id'],
+                            'task': row['task_name'],
+                            'date': row['task_due_date'].strftime('%Y-%m-%d') if hasattr(row['task_due_date'], 'strftime') else str(row['task_due_date']),
+                            'notes': row['task_notes'] or ''
+                        }
+                        
+                        if row['is_completed']:
+                            task_data['completed_on'] = row['completed_on'].strftime('%Y-%m-%d') if row['completed_on'] else ''
+                            result[board_id]['completed'].append(task_data)
+                        else:
+                            result[board_id]['active'].append(task_data)
+                
+                return result
+
     def create_board(self, user_id, header, board_id):
         """
         Create a new board for a user.
