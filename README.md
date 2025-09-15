@@ -2,6 +2,23 @@
 
 A simple, elegant task management web application built with Flask and PostgreSQL. Create boards, manage tasks, and track your productivity with an intuitive web interface.
 
+## Screenshots
+
+### Login Page
+![Login Page](screenshots/login-page.png)
+
+The clean, modern login interface with a beautiful gradient background provides secure user authentication.
+
+### Dashboard
+![Dashboard](screenshots/dashboard.png)
+
+The main dashboard shows your organized boards with active and completed tasks. Features include:
+- Multiple board management (Consultant Cloud, Clyde, Home, Life stuff)
+- Task creation with due dates and notes
+- Edit and Done buttons for task management
+- Color-coded task status indicators
+- Completed tasks tracking
+
 ## Features
 
 - **User Authentication**: Secure registration and login system
