@@ -51,18 +51,22 @@ LOGIN_TEMPLATE = '''
             margin-bottom: 30px;
         }
 
-        .logo h1 {
-            color: #333;
-            font-size: 2.5rem;
-            font-weight: 700;
-            letter-spacing: -2px;
-            margin-bottom: 8px;
+        .logo img {
+            width: 180px;
+            height: auto;
+            margin-bottom: 12px;
+            transition: transform 0.3s ease;
+        }
+
+        .logo img:hover {
+            transform: scale(1.05);
         }
 
         .logo p {
             color: #666;
             font-size: 0.9rem;
             opacity: 0.8;
+            margin-top: 8px;
         }
 
         .form-group {
@@ -144,8 +148,8 @@ LOGIN_TEMPLATE = '''
 <body>
     <div class="login-container">
         <div class="logo">
-            <h1>TSKMNGR</h1>
-            <p>Task Management System</p>
+            <img src="{{ url_for('static', filename='favicon.png') }}" alt="TSKMNGR Logo">
+            <p>Simple Task Manager</p>
         </div>
 
         {% if error %}
@@ -228,18 +232,22 @@ REGISTER_TEMPLATE = '''
             margin-bottom: 30px;
         }
 
-        .logo h1 {
-            color: #333;
-            font-size: 2.5rem;
-            font-weight: 700;
-            letter-spacing: -2px;
-            margin-bottom: 8px;
+        .logo img {
+            width: 180px;
+            height: auto;
+            margin-bottom: 12px;
+            transition: transform 0.3s ease;
+        }
+
+        .logo img:hover {
+            transform: scale(1.05);
         }
 
         .logo p {
             color: #666;
             font-size: 0.9rem;
             opacity: 0.8;
+            margin-top: 8px;
         }
 
         .form-group {
@@ -338,7 +346,7 @@ REGISTER_TEMPLATE = '''
 <body>
     <div class="register-container">
         <div class="logo">
-            <h1>TSKMNGR</h1>
+            <img src="{{ url_for('static', filename='favicon.png') }}" alt="TSKMNGR Logo">
             <p>Create Your Account</p>
         </div>
 
