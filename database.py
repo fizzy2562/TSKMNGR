@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class Database:
     # Feature flag for performance optimizations
-    USE_OPTIMIZED_QUERIES = False  # Set to True to enable JOIN optimization
+    USE_OPTIMIZED_QUERIES = True  # Set to True to enable JOIN optimization
     
     def __init__(self):
         """
