@@ -717,7 +717,7 @@ DASHBOARD_TEMPLATE = """
                 </form>
                 {% else %}
                 <div class="task-limit-message">
-                    <span>⚠️ Task limit reached (10/10). Complete or delete tasks to add new ones.</span>
+                    <span id="task-limit-text">⚠️ Task limit reached (10/10). Complete or delete tasks to add new ones.</span>
                 </div>
                 {% endif %}
 
@@ -887,6 +887,26 @@ DASHBOARD_TEMPLATE = """
                 }
             }, 3000);
         }
+
+        // Random humorous task limit messages
+        function setRandomTaskLimitMessage() {
+            const messages = [
+                "⚠️ Task limit reached (10/10)—guess this \"lightweight tool\" skipped leg day.",
+                "⚠️ Task limit reached (10/10)—so lightweight it can't lift one more.",
+                "⚠️ Task limit reached (10/10)—the \"lightweight tool\" just tapped out.",
+                "⚠️ Task limit reached (10/10)—lightweight tool; heavyweight boundaries.",
+                "⚠️ Task limit reached (10/10)—so lightweight, it's allergic to tasks."
+            ];
+            
+            const taskLimitElement = document.getElementById('task-limit-text');
+            if (taskLimitElement) {
+                const randomMessage = messages[Math.floor(Math.random() * messages.length)];
+                taskLimitElement.textContent = randomMessage;
+            }
+        }
+
+        // Set random message on page load
+        document.addEventListener('DOMContentLoaded', setRandomTaskLimitMessage);
     </script>
 </body>
 </html>
