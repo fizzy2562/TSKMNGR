@@ -4,11 +4,21 @@ import os
 import re
 import uuid
 import secrets
+import random
 from datetime import datetime, timedelta
 
 # Import our modules
 from database import Database
 from templates import LOGIN_TEMPLATE, REGISTER_TEMPLATE, DASHBOARD_TEMPLATE
+
+def get_random_task_limit_message():
+    """Read random message from task_limit_messages.txt file."""
+    try:
+        with open('task_limit_messages.txt', 'r', encoding='utf-8') as f:
+            messages = [line.strip() for line in f.readlines() if line.strip()]
+        return random.choice(messages) if messages else "Task limit reached (10/10). Complete tasks to add new ones."
+    except FileNotFoundError:
+        return "Task limit reached (10/10). Complete tasks to add new ones."
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -131,11 +141,13 @@ def dashboard():
             task["notes_html"] = linkify(task.get("notes", ""))
     
     today_date = datetime.now().strftime("%Y-%m-%d")
+    random_task_message = get_random_task_limit_message()
     
     return render_template_string(DASHBOARD_TEMPLATE, 
                                 boards=boards, 
                                 today_date=today_date,
-                                username=username)
+                                username=username,
+                                task_limit_message=random_task_message)
 
 @app.route("/add_board", methods=["POST"])
 @login_required
