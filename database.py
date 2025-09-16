@@ -123,9 +123,13 @@ class Database:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_completed_position ON tasks(board_id, is_completed, position)')
                     logger.info("Created index: idx_tasks_board_completed_position")
                     
-                    # Archive performance index
+                    # Archive performance indexes
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_archived_tasks_user_archived ON archived_tasks(user_id, archived_on)')
                     logger.info("Created index: idx_archived_tasks_user_archived")
+                    
+                    # Archive selection query index - matches WHERE board_id, is_completed and ORDER BY completed_on, created_at
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_archive_select ON tasks(board_id, is_completed, completed_on, created_at)')
+                    logger.info("Created index: idx_tasks_archive_select")
                     
                     conn.commit()
                     logger.info("Database initialized successfully")
