@@ -53,7 +53,11 @@ class ArchiveManager:
             
         use_existing_conn = conn is not None
         if not use_existing_conn:
-            conn = self.db.get_connection()
+            # Get connection from context manager
+            conn_manager = self.db.get_connection()
+            conn = conn_manager.__enter__()
+        else:
+            conn_manager = None
             
         try:
             with conn.cursor() as cursor:
@@ -93,8 +97,7 @@ class ArchiveManager:
                     FROM tasks 
                     WHERE board_id = %s AND is_completed = TRUE
                     ORDER BY 
-                        completed_on IS NULL DESC,  -- NULLs first
-                        completed_on ASC,           -- Then by completed_on
+                        completed_on NULLS FIRST,   -- NULLs first, then by completed_on ASC
                         created_at ASC              -- Then by created_at
                     LIMIT %s
                 ''', (board_id, overflow_count))
@@ -142,8 +145,8 @@ class ArchiveManager:
                 conn.rollback()
             raise
         finally:
-            if not use_existing_conn:
-                conn.close()
+            if not use_existing_conn and conn_manager:
+                conn_manager.__exit__(None, None, None)
     
     def get_archived_tasks(self, user_id, limit=50, offset=0):
         """
