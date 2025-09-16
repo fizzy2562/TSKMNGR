@@ -651,6 +651,20 @@ DASHBOARD_TEMPLATE = """
             border: 2px solid #ffd900;
             border-radius: 6px;
         }
+        .task-limit-message {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .task-limit-message span {
+            display: inline-block;
+        }
         @media (max-width: 768px) {
             .boards-grid {
                 grid-template-columns: 1fr;
@@ -694,12 +708,18 @@ DASHBOARD_TEMPLATE = """
                     {% endif %}
                 </div>
 
+                {% if board['active']|length < 10 %}
                 <form method="post" action="{{ url_for('add_task', board_id=board_id) }}" class="add-task-form">
                     <input type="text" name="task" placeholder="New task" required maxlength="64">
                     <input type="date" name="date" value="{{ today_date }}" required>
                     <input type="text" name="notes" placeholder="Notes" maxlength="256">
                     <button type="submit">Add</button>
                 </form>
+                {% else %}
+                <div class="task-limit-message">
+                    <span>⚠️ Task limit reached (10/10). Complete or delete tasks to add new ones.</span>
+                </div>
+                {% endif %}
 
                 <div class="section-title">Active Tasks</div>
                 <ul>
