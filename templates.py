@@ -891,11 +891,11 @@ DASHBOARD_TEMPLATE = """
         // Random humorous task limit messages
         function setRandomTaskLimitMessage() {
             const messages = [
-                '⚠️ Task limit reached (10/10)—guess this "lightweight tool" skipped leg day.',
-                '⚠️ Task limit reached (10/10)—so lightweight it can\'t lift one more.',
-                '⚠️ Task limit reached (10/10)—the "lightweight tool" just tapped out.',
-                '⚠️ Task limit reached (10/10)—lightweight tool; heavyweight boundaries.',
-                '⚠️ Task limit reached (10/10)—so lightweight, it\'s allergic to tasks.'
+                `⚠️ Task limit reached (10/10)—guess this "lightweight tool" skipped leg day.`,
+                `⚠️ Task limit reached (10/10)—so lightweight it can't lift one more.`,
+                `⚠️ Task limit reached (10/10)—the "lightweight tool" just tapped out.`,
+                `⚠️ Task limit reached (10/10)—lightweight tool; heavyweight boundaries.`,
+                `⚠️ Task limit reached (10/10)—so lightweight, it's allergic to tasks.`
             ];
             
             const taskLimitElement = document.getElementById('task-limit-text');
