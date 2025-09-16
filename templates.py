@@ -422,7 +422,7 @@ DASHBOARD_TEMPLATE = """
             align-items: center;
             gap: 20px;
         }
-        .logout-btn {
+        .logout-btn, .archived-btn {
             background: rgba(255,255,255,0.2);
             color: white;
             border: 1px solid rgba(255,255,255,0.3);
@@ -431,7 +431,7 @@ DASHBOARD_TEMPLATE = """
             text-decoration: none;
             transition: all 0.3s ease;
         }
-        .logout-btn:hover {
+        .logout-btn:hover, .archived-btn:hover {
             background: rgba(255,255,255,0.3);
         }
         .main-container {
@@ -677,6 +677,7 @@ DASHBOARD_TEMPLATE = """
         <h1>TSKMNGR</h1>
         <div class="user-info">
             <span>Welcome, {{ username }}!</span>
+            <a href="{{ url_for('archived') }}" class="archived-btn">Archived</a>
             <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
         </div>
     </div>
@@ -892,3 +893,267 @@ DASHBOARD_TEMPLATE = """
 </body>
 </html>
 """
+
+ARCHIVED_TEMPLATE = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TSKMNGR - Archived Tasks</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon-32.png') }}" sizes="32x32">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon-16.png') }}" sizes="16x16">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.png') }}">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 15px;
+        }
+
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            transition: background-color 0.3s;
+        }
+
+        .nav-links a:hover {
+            background-color: rgba(255,255,255,0.2);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .archived-header {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .archived-header h2 {
+            font-size: 24px;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .archived-header p {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .archived-tasks {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+
+        .task-item {
+            border-bottom: 1px solid #f0f0f0;
+            padding: 20px 24px;
+            transition: background-color 0.2s;
+        }
+
+        .task-item:hover {
+            background-color: #fafafa;
+        }
+
+        .task-item:last-child {
+            border-bottom: none;
+        }
+
+        .task-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+
+        .board-name {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .archived-date {
+            color: #999;
+            font-size: 14px;
+        }
+
+        .task-content {
+            margin: 12px 0;
+        }
+
+        .task-title {
+            font-size: 18px;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .task-due {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .task-notes {
+            color: #555;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .completed-date {
+            color: #28a745;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .no-tasks {
+            text-align: center;
+            padding: 60px 24px;
+            color: #666;
+        }
+
+        .no-tasks h3 {
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin-top: 24px;
+            gap: 8px;
+        }
+
+        .pagination a {
+            padding: 8px 16px;
+            background: white;
+            border-radius: 6px;
+            text-decoration: none;
+            color: #667eea;
+            border: 1px solid #ddd;
+            transition: all 0.3s;
+        }
+
+        .pagination a:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .pagination .current {
+            background: #667eea;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <h1>📋 TSKMNGR - Archived Tasks</h1>
+            <div class="nav-links">
+                <a href="{{ url_for('dashboard') }}">Dashboard</a>
+                <a href="{{ url_for('logout') }}">Logout</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="archived-header">
+            <h2>Your Archived Tasks</h2>
+            <p>Tasks that were automatically archived when boards exceeded 10 total tasks.</p>
+        </div>
+
+        <div class="archived-tasks">
+            {% if archived_tasks %}
+                {% for task in archived_tasks %}
+                <div class="task-item">
+                    <div class="task-meta">
+                        <div class="board-name">{{ task.board_name_at_archive }}</div>
+                        <div class="archived-date">Archived {{ task.archived_on.strftime('%b %d, %Y') }}</div>
+                    </div>
+                    <div class="task-content">
+                        <div class="task-title">{{ task.task }}</div>
+                        <div class="task-due">Due: {{ task.due_date.strftime('%b %d, %Y') }}</div>
+                        {% if task.notes %}
+                        <div class="task-notes">{{ task.notes|safe }}</div>
+                        {% endif %}
+                        {% if task.completed_on %}
+                        <div class="completed-date">Completed {{ task.completed_on.strftime('%b %d, %Y') }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="no-tasks">
+                    <h3>No archived tasks yet</h3>
+                    <p>Tasks will appear here when they get automatically archived from full boards.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        {% if total_pages > 1 %}
+        <div class="pagination">
+            {% if current_page > 1 %}
+                <a href="{{ url_for('archived', page=current_page-1) }}">&laquo; Previous</a>
+            {% endif %}
+            
+            {% for page_num in range(1, total_pages + 1) %}
+                {% if page_num == current_page %}
+                    <a href="#" class="current">{{ page_num }}</a>
+                {% else %}
+                    <a href="{{ url_for('archived', page=page_num) }}">{{ page_num }}</a>
+                {% endif %}
+            {% endfor %}
+            
+            {% if current_page < total_pages %}
+                <a href="{{ url_for('archived', page=current_page+1) }}">Next &raquo;</a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
+'''

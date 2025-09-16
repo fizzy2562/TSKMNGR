@@ -92,6 +92,23 @@ class Database:
                         )
                     ''')
                     
+                    # Archived tasks table for task archiving system
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS archived_tasks (
+                            id SERIAL PRIMARY KEY,
+                            user_id INTEGER NOT NULL,
+                            original_task_id INTEGER NOT NULL,
+                            board_id TEXT NOT NULL,
+                            board_name_at_archive TEXT NOT NULL,
+                            task TEXT NOT NULL,
+                            due_date DATE NOT NULL,
+                            notes TEXT DEFAULT '',
+                            completed_on DATE,
+                            archived_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                        )
+                    ''')
+                    
                     # Create indexes for better performance
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_boards_user_id ON boards(user_id)')
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id)')
@@ -105,6 +122,10 @@ class Database:
                     logger.info("Created index: idx_tasks_board_position") 
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_completed_position ON tasks(board_id, is_completed, position)')
                     logger.info("Created index: idx_tasks_board_completed_position")
+                    
+                    # Archive performance index
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_archived_tasks_user_archived ON archived_tasks(user_id, archived_on)')
+                    logger.info("Created index: idx_archived_tasks_user_archived")
                     
                     conn.commit()
                     logger.info("Database initialized successfully")

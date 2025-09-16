@@ -5,11 +5,17 @@ import re
 import uuid
 import secrets
 import random
+import logging
 from datetime import datetime, timedelta
 
 # Import our modules
 from database import Database
-from templates import LOGIN_TEMPLATE, REGISTER_TEMPLATE, DASHBOARD_TEMPLATE
+from templates import LOGIN_TEMPLATE, REGISTER_TEMPLATE, DASHBOARD_TEMPLATE, ARCHIVED_TEMPLATE
+from archiving import ArchiveManager
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def get_random_task_limit_message():
     """Read random message from task_limit_messages.txt file."""
@@ -29,8 +35,9 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
-# Initialize database
+# Initialize database and archiving
 db = Database()
+archive_manager = ArchiveManager(db)
 
 # Helper functions
 def linkify(text):
@@ -209,7 +216,19 @@ def edit_task(board_id, task_idx):
 @login_required
 def complete(board_id, task_idx):
     user_id = session.get('user_id')
+    
+    # Complete the task first
     db.complete_task(board_id, user_id, task_idx)
+    
+    # Then check if archiving is needed
+    try:
+        archived_count = archive_manager.archive_overflow_tasks(board_id, user_id)
+        if archived_count > 0:
+            logger.info(f"Archived {archived_count} tasks from board {board_id} after task completion")
+    except Exception as e:
+        logger.error(f"Error during archiving after task completion: {e}")
+        # Don't fail the completion if archiving fails - just log it
+    
     return redirect(url_for("dashboard"))
 
 @app.route("/uncomplete/<board_id>/<int:task_id>", methods=["POST"])
@@ -218,6 +237,35 @@ def uncomplete(board_id, task_id):
     user_id = session.get('user_id')
     db.uncomplete_task(board_id, user_id, task_id)
     return redirect(url_for("dashboard"))
+
+@app.route("/archived")
+@login_required
+def archived():
+    user_id = session.get('user_id')
+    
+    # Get pagination parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+    
+    # Calculate offset
+    offset = (page - 1) * per_page
+    
+    # Get archived tasks and total count
+    archived_tasks = archive_manager.get_archived_tasks(user_id, limit=per_page, offset=offset)
+    total_count = archive_manager.get_archived_tasks_count(user_id)
+    
+    # Calculate pagination info
+    total_pages = (total_count + per_page - 1) // per_page  # Ceiling division
+    
+    # Add linkified notes to archived tasks
+    for task in archived_tasks:
+        task['notes'] = linkify(task.get('notes', ''))
+    
+    return render_template_string(ARCHIVED_TEMPLATE,
+                                archived_tasks=archived_tasks,
+                                current_page=page,
+                                total_pages=total_pages,
+                                total_count=total_count)
 
 if __name__ == "__main__":
     # Get port from environment variable (for deployment)
