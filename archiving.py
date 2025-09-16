@@ -52,98 +52,100 @@ class ArchiveManager:
             return 0
             
         use_existing_conn = conn is not None
-        if not use_existing_conn:
-            conn = self.db.get_connection()
-            
         try:
-            with conn.cursor() as cursor:
-                # Count total tasks on the board
-                cursor.execute(
-                    'SELECT COUNT(*) as total FROM tasks WHERE board_id = %s',
-                    (board_id,)
-                )
-                total_tasks = cursor.fetchone()['total']
-                
-                logger.debug(f"Board {board_id} has {total_tasks} total tasks (limit: {self.MAX_TASKS_PER_BOARD})")
-                
-                if total_tasks <= self.MAX_TASKS_PER_BOARD:
-                    logger.debug(f"Board {board_id} within limits, no archiving needed")
-                    return 0
-                
-                # Calculate how many tasks need to be archived
-                overflow_count = total_tasks - self.MAX_TASKS_PER_BOARD
-                logger.info(f"Board {board_id} has {overflow_count} overflow tasks to archive")
-                
-                # Get board name for archive record
-                cursor.execute(
-                    'SELECT header FROM boards WHERE id = %s AND user_id = %s',
-                    (board_id, user_id)
-                )
-                board_result = cursor.fetchone()
-                if not board_result:
-                    logger.error(f"Board {board_id} not found for user {user_id}")
-                    return 0
-                    
-                board_name = board_result['header']
-                
-                # Select oldest completed tasks to archive
-                # Order by completed_on (NULLs first) then created_at as per design
-                cursor.execute('''
-                    SELECT id, task, due_date, notes, completed_on, created_at
-                    FROM tasks 
-                    WHERE board_id = %s AND is_completed = TRUE
-                    ORDER BY 
-                        completed_on IS NULL DESC,  -- NULLs first
-                        completed_on ASC,           -- Then by completed_on
-                        created_at ASC              -- Then by created_at
-                    LIMIT %s
-                ''', (board_id, overflow_count))
-                
-                tasks_to_archive = cursor.fetchall()
-                
-                if not tasks_to_archive:
-                    logger.warning(f"No completed tasks found to archive on board {board_id}")
-                    return 0
-                
-                # Archive the selected tasks
-                archived_count = 0
-                for task in tasks_to_archive:
-                    # Insert into archived_tasks
-                    cursor.execute('''
-                        INSERT INTO archived_tasks 
-                        (user_id, original_task_id, board_id, board_name_at_archive, 
-                         task, due_date, notes, completed_on, archived_on)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ''', (
-                        user_id,
-                        task['id'],
-                        board_id,
-                        board_name,
-                        task['task'],
-                        task['due_date'],
-                        task['notes'],
-                        task['completed_on'],
-                        datetime.now()
-                    ))
-                    
-                    # Remove from tasks table
-                    cursor.execute('DELETE FROM tasks WHERE id = %s', (task['id'],))
-                    archived_count += 1
-                
-                if not use_existing_conn:
-                    conn.commit()
-                    
-                logger.info(f"Archived {archived_count} tasks from board {board_id}")
-                return archived_count
-                
+            # Open a connection only if caller didn't pass one
+            if not use_existing_conn:
+                with self.db.get_connection() as managed_conn:
+                    with managed_conn.cursor() as cursor:
+                        return self._archive_overflow_with_cursor(cursor, board_id, user_id, managed_conn)
+            else:
+                # Use provided connection and its cursor; caller controls commit
+                with conn.cursor() as cursor:
+                    return self._archive_overflow_with_cursor(cursor, board_id, user_id, conn)
         except Exception as e:
             logger.error(f"Error during archiving for board {board_id}: {e}")
-            if not use_existing_conn:
-                conn.rollback()
             raise
-        finally:
-            if not use_existing_conn:
-                conn.close()
+
+    def _archive_overflow_with_cursor(self, cursor, board_id, user_id, conn):
+        """Internal helper that performs archiving using an existing cursor/connection."""
+        # Count total tasks on the board
+        cursor.execute(
+            'SELECT COUNT(*) as total FROM tasks WHERE board_id = %s',
+            (board_id,)
+        )
+        total_tasks = cursor.fetchone()['total']
+
+        logger.debug(f"Board {board_id} has {total_tasks} total tasks (limit: {self.MAX_TASKS_PER_BOARD})")
+
+        if total_tasks <= self.MAX_TASKS_PER_BOARD:
+            logger.debug(f"Board {board_id} within limits, no archiving needed")
+            return 0
+
+        # Calculate how many tasks need to be archived
+        overflow_count = total_tasks - self.MAX_TASKS_PER_BOARD
+        logger.info(f"Board {board_id} has {overflow_count} overflow tasks to archive")
+
+        # Get board name for archive record
+        cursor.execute(
+            'SELECT header FROM boards WHERE id = %s AND user_id = %s',
+            (board_id, user_id)
+        )
+        board_result = cursor.fetchone()
+        if not board_result:
+            logger.error(f"Board {board_id} not found for user {user_id}")
+            return 0
+
+        board_name = board_result['header']
+
+        # Select oldest completed tasks to archive
+        cursor.execute('''
+            SELECT id, task, due_date, notes, completed_on, created_at
+            FROM tasks 
+            WHERE board_id = %s AND is_completed = TRUE
+            ORDER BY completed_on NULLS FIRST, created_at ASC
+            LIMIT %s
+        ''', (board_id, overflow_count))
+
+        tasks_to_archive = cursor.fetchall()
+
+        if not tasks_to_archive:
+            logger.warning(f"No completed tasks found to archive on board {board_id}")
+            return 0
+
+        # Archive the selected tasks
+        archived_count = 0
+        for task in tasks_to_archive:
+            # Insert into archived_tasks
+            cursor.execute('''
+                INSERT INTO archived_tasks 
+                (user_id, original_task_id, board_id, board_name_at_archive, 
+                 task, due_date, notes, completed_on, archived_on)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (
+                user_id,
+                task['id'],
+                board_id,
+                board_name,
+                task['task'],
+                task['due_date'],
+                task['notes'],
+                task['completed_on'],
+                datetime.now()
+            ))
+
+            # Remove from tasks table
+            cursor.execute('DELETE FROM tasks WHERE id = %s', (task['id'],))
+            archived_count += 1
+
+        # Commit only if we own the managed connection
+        try:
+            conn.commit()
+        except Exception:
+            # If caller passed a managed transaction, they control commit
+            pass
+
+        logger.info(f"Archived {archived_count} tasks from board {board_id}")
+        return archived_count
     
     def get_archived_tasks(self, user_id, limit=50, offset=0):
         """

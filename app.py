@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from database import Database
 from templates import LOGIN_TEMPLATE, REGISTER_TEMPLATE, DASHBOARD_TEMPLATE, ARCHIVED_TEMPLATE
 from archiving import ArchiveManager
+from markupsafe import escape
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -216,19 +217,13 @@ def edit_task(board_id, task_idx):
 @login_required
 def complete(board_id, task_idx):
     user_id = session.get('user_id')
-    
-    # Complete the task first
-    db.complete_task(board_id, user_id, task_idx)
-    
-    # Then check if archiving is needed
+    # Complete and archive atomically
     try:
-        archived_count = archive_manager.archive_overflow_tasks(board_id, user_id)
-        if archived_count > 0:
-            logger.info(f"Archived {archived_count} tasks from board {board_id} after task completion")
+        archived_count = db.complete_task_and_archive(board_id, user_id, task_idx, archive_manager)
+        if archived_count:
+            logger.info(f"Archived {archived_count} task(s) from board {board_id} after completion")
     except Exception as e:
-        logger.error(f"Error during archiving after task completion: {e}")
-        # Don't fail the completion if archiving fails - just log it
-    
+        logger.error(f"Error during atomic complete+archive: {e}")
     return redirect(url_for("dashboard"))
 
 @app.route("/uncomplete/<board_id>/<int:task_id>", methods=["POST"])
@@ -245,6 +240,7 @@ def archived():
     
     # Get pagination parameters
     page = request.args.get('page', 1, type=int)
+    page = 1 if page is None or page < 1 else page
     per_page = 50
     
     # Calculate offset
@@ -259,7 +255,7 @@ def archived():
     
     # Add linkified notes to archived tasks
     for task in archived_tasks:
-        task['notes'] = linkify(task.get('notes', ''))
+        task['notes'] = linkify(escape(task.get('notes', '')))
     
     return render_template_string(ARCHIVED_TEMPLATE,
                                 archived_tasks=archived_tasks,
