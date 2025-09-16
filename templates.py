@@ -717,7 +717,7 @@ DASHBOARD_TEMPLATE = """
                 </form>
                 {% else %}
                 <div class="task-limit-message">
-                    <span id="task-limit-text">⚠️ Task limit reached (10/10). Complete or delete tasks to add new ones.</span>
+                    <span id="task-limit-text"></span>
                 </div>
                 {% endif %}
 
@@ -902,6 +902,7 @@ DASHBOARD_TEMPLATE = """
             if (taskLimitElement) {
                 const randomMessage = messages[Math.floor(Math.random() * messages.length)];
                 taskLimitElement.textContent = randomMessage;
+                console.log('Set random task limit message:', randomMessage);
             }
         }
 
