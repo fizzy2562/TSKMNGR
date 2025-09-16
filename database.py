@@ -126,9 +126,13 @@ class Database:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_archive_select ON tasks(board_id, is_completed, completed_on, created_at)')
                     logger.info("Created index: idx_tasks_archive_select")
                     
-                    # Archive performance index
+                    # Archive performance indexes
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_archived_tasks_user_archived ON archived_tasks(user_id, archived_on)')
                     logger.info("Created index: idx_archived_tasks_user_archived")
+                    
+                    # Archive selection query index - matches WHERE board_id, is_completed and ORDER BY completed_on, created_at
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_archive_select ON tasks(board_id, is_completed, completed_on, created_at)')
+                    logger.info("Created index: idx_tasks_archive_select")
                     
                     conn.commit()
                     logger.info("Database initialized successfully")
@@ -611,6 +615,55 @@ class Database:
                     conn.commit()
 
                 return archived_count
+    
+    def complete_task_with_archiving(self, board_id, user_id, task_idx, archive_manager):
+        """
+        Complete a task and handle archiving atomically in a single transaction.
+        
+        Args:
+            board_id (str): The board ID
+            user_id (int): The user ID (for security)
+            task_idx (int): Task index in the active tasks list
+            archive_manager: The ArchiveManager instance
+            
+        Returns:
+            int: Number of tasks archived
+        """
+        with self.get_connection() as conn:
+            try:
+                with conn.cursor() as cursor:
+                    # Get the task at the specified index
+                    cursor.execute(
+                        '''SELECT t.id FROM tasks t 
+                           JOIN boards b ON t.board_id = b.id 
+                           WHERE b.id = %s AND b.user_id = %s AND t.is_completed = FALSE 
+                           ORDER BY t.position, t.created_at 
+                           LIMIT 1 OFFSET %s''',
+                        (board_id, user_id, task_idx)
+                    )
+                    task = cursor.fetchone()
+                    
+                    if not task:
+                        logger.error(f"Task at index {task_idx} not found in board {board_id}")
+                        return 0
+                    
+                    # Mark the task as completed
+                    cursor.execute(
+                        'UPDATE tasks SET is_completed = TRUE, completed_on = %s WHERE id = %s',
+                        (datetime.now().strftime("%Y-%m-%d"), task['id'])
+                    )
+                    
+                    # Now handle archiving within the same transaction
+                    archived_count = archive_manager.archive_overflow_tasks(board_id, user_id, conn)
+                    
+                    conn.commit()
+                    logger.info(f"Completed task {task['id']} in board {board_id}, archived {archived_count} tasks")
+                    return archived_count
+                    
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"Error in atomic complete_task_with_archiving: {e}")
+                raise
     
     def uncomplete_task(self, board_id, user_id, task_id):
         """

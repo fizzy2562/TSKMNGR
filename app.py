@@ -44,6 +44,12 @@ archive_manager = ArchiveManager(db)
 def linkify(text):
     if not text:
         return ""
+    
+    # First escape HTML to prevent injection
+    import html
+    text = html.escape(text)
+    
+    # Then linkify emails and URLs on the escaped text
     text = re.sub(
         r'([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)',
         r'<a href="mailto:\1">\1</a>', text
@@ -217,13 +223,16 @@ def edit_task(board_id, task_idx):
 @login_required
 def complete(board_id, task_idx):
     user_id = session.get('user_id')
-    # Complete and archive atomically
+    # Complete task and handle archiving atomically
     try:
-        archived_count = db.complete_task_and_archive(board_id, user_id, task_idx, archive_manager)
-        if archived_count:
-            logger.info(f"Archived {archived_count} task(s) from board {board_id} after completion")
+        archived_count = db.complete_task_with_archiving(board_id, user_id, task_idx, archive_manager)
+        if archived_count > 0:
+            logger.info(f"Task completion triggered archiving of {archived_count} tasks from board {board_id}")
     except Exception as e:
-        logger.error(f"Error during atomic complete+archive: {e}")
+        logger.error(f"Error during atomic task completion and archiving: {e}")
+        # Fall back to non-atomic completion if atomic method fails
+        db.complete_task(board_id, user_id, task_idx)
+    
     return redirect(url_for("dashboard"))
 
 @app.route("/uncomplete/<board_id>/<int:task_id>", methods=["POST"])
