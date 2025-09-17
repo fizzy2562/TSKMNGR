@@ -512,6 +512,51 @@ class Database:
         except Exception as e:
             logger.error(f"Failed to add task '{task}' to board {board_id}: {e}")
             raise
+
+    def add_task_with_archiving(self, board_id, user_id, task, due_date, notes, archive_manager):
+        """Atomically add a task, archiving oldest completed if total would exceed max.
+
+        - Enforces active < 10
+        - Ensures (active + completed + 1) <= MAX by archiving completed first
+        Returns True if task added, False otherwise.
+        """
+        with self.get_connection() as conn:
+            with conn.cursor() as cursor:
+                # Verify board ownership
+                cursor.execute('SELECT id FROM boards WHERE id = %s AND user_id = %s', (board_id, user_id))
+                board = cursor.fetchone()
+                if not board:
+                    logger.error(f"Board {board_id} not found or not owned by user {user_id}")
+                    return False
+
+                # Enforce active limit
+                cursor.execute('SELECT COUNT(*) AS cnt FROM tasks WHERE board_id = %s AND is_completed = FALSE', (board_id,))
+                active_cnt = cursor.fetchone()['cnt']
+                if active_cnt >= 10:
+                    logger.warning(f"Cannot add task - board {board_id} already has 10 active tasks")
+                    return False
+
+                # Ensure total + 1 <= MAX by archiving completed tasks first
+                try:
+                    archive_manager.archive_to_fit(board_id, user_id, required_additional=1, conn=conn)
+                except Exception as e:
+                    logger.error(f"Archiving to fit failed for board {board_id}: {e}")
+                    return False
+
+                # Compute next position and insert
+                cursor.execute('SELECT MAX(position) AS max_pos FROM tasks WHERE board_id = %s AND is_completed = FALSE', (board_id,))
+                row = cursor.fetchone()
+                position = (row['max_pos'] if row['max_pos'] is not None else 0) + 1
+
+                cursor.execute(
+                    '''INSERT INTO tasks (board_id, task, due_date, notes, position)
+                       VALUES (%s, %s, %s, %s, %s) RETURNING id''',
+                    (board_id, task, due_date, notes, position)
+                )
+                _tid = cursor.fetchone()['id']
+                conn.commit()
+                logger.info(f"Added task with archiving to board {board_id}: id={_tid}")
+                return True
     
     def update_task(self, board_id, user_id, task_idx, new_task, new_date, new_notes):
         """
@@ -581,40 +626,8 @@ class Database:
                     logger.error(f"Task at index {task_idx} not found in board {board_id}")
 
     def complete_task_and_archive(self, board_id, user_id, task_idx, archive_manager):
-        """Atomically complete a task and archive overflow tasks.
-
-        Completes the task at index in the active list for the board and then
-        archives oldest completed tasks until total <= MAX_TASKS_PER_BOARD.
-        """
-        with self.get_connection() as conn:
-            with conn.cursor() as cursor:
-                # Complete task (same selection logic as complete_task)
-                cursor.execute(
-                    '''SELECT t.id FROM tasks t 
-                       JOIN boards b ON t.board_id = b.id 
-                       WHERE b.id = %s AND b.user_id = %s AND t.is_completed = FALSE 
-                       ORDER BY t.position, t.created_at 
-                       LIMIT 1 OFFSET %s''',
-                    (board_id, user_id, task_idx)
-                )
-                task = cursor.fetchone()
-
-                if not task:
-                    return 0
-
-                cursor.execute(
-                    'UPDATE tasks SET is_completed = TRUE, completed_on = %s WHERE id = %s',
-                    (datetime.now().strftime("%Y-%m-%d"), task['id'])
-                )
-
-                # Archive overflow within the same transaction
-                archived_count = 0
-                try:
-                    archived_count = archive_manager.archive_overflow_tasks(board_id, user_id, conn=conn)
-                finally:
-                    conn.commit()
-
-                return archived_count
+        """Backward-compatible alias for complete_task_with_archiving."""
+        return self.complete_task_with_archiving(board_id, user_id, task_idx, archive_manager)
     
     def complete_task_with_archiving(self, board_id, user_id, task_idx, archive_manager):
         """
