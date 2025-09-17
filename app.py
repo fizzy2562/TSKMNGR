@@ -147,6 +147,23 @@ def dashboard():
     # Get boards from database
     boards = db.get_user_boards(user_id)
     
+    # Safety net: archive overflow if any board exceeds total cap
+    try:
+        max_total = ArchiveManager.MAX_TASKS_PER_BOARD
+        archived_any = False
+        for b_id, board in list(boards.items()):
+            total = len(board.get('active', [])) + len(board.get('completed', []))
+            if total > max_total:
+                try:
+                    archive_manager.archive_overflow_tasks(b_id, user_id)
+                    archived_any = True
+                except Exception as e:
+                    logger.error(f"Safety net archiving failed for board {b_id}: {e}")
+        if archived_any:
+            boards = db.get_user_boards(user_id)
+    except Exception as e:
+        logger.error(f"Dashboard safety net error: {e}")
+    
     # Add linkified notes to all tasks
     for board in boards.values():
         for task in board.get("active", []):
@@ -202,7 +219,12 @@ def add_task(board_id):
     notes = request.form.get("notes", "").strip()
     
     if task and due_date:
-        db.add_task(board_id, user_id, task, due_date, notes)
+        try:
+            ok = db.add_task_with_archiving(board_id, user_id, task, due_date, notes, archive_manager)
+            if not ok:
+                logger.warning(f"Add task blocked due to limits for board {board_id}")
+        except Exception as e:
+            logger.error(f"Error adding task with archiving for board {board_id}: {e}")
     
     return redirect(url_for("dashboard"))
 

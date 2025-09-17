@@ -512,6 +512,51 @@ class Database:
         except Exception as e:
             logger.error(f"Failed to add task '{task}' to board {board_id}: {e}")
             raise
+
+    def add_task_with_archiving(self, board_id, user_id, task, due_date, notes, archive_manager):
+        """Atomically add a task, archiving oldest completed if total would exceed max.
+
+        - Enforces active < 10
+        - Ensures (active + completed + 1) <= MAX by archiving completed first
+        Returns True if task added, False otherwise.
+        """
+        with self.get_connection() as conn:
+            with conn.cursor() as cursor:
+                # Verify board ownership
+                cursor.execute('SELECT id FROM boards WHERE id = %s AND user_id = %s', (board_id, user_id))
+                board = cursor.fetchone()
+                if not board:
+                    logger.error(f"Board {board_id} not found or not owned by user {user_id}")
+                    return False
+
+                # Enforce active limit
+                cursor.execute('SELECT COUNT(*) AS cnt FROM tasks WHERE board_id = %s AND is_completed = FALSE', (board_id,))
+                active_cnt = cursor.fetchone()['cnt']
+                if active_cnt >= 10:
+                    logger.warning(f"Cannot add task - board {board_id} already has 10 active tasks")
+                    return False
+
+                # Ensure total + 1 <= MAX by archiving completed tasks first
+                try:
+                    archive_manager.archive_to_fit(board_id, user_id, required_additional=1, conn=conn)
+                except Exception as e:
+                    logger.error(f"Archiving to fit failed for board {board_id}: {e}")
+                    return False
+
+                # Compute next position and insert
+                cursor.execute('SELECT MAX(position) AS max_pos FROM tasks WHERE board_id = %s AND is_completed = FALSE', (board_id,))
+                row = cursor.fetchone()
+                position = (row['max_pos'] if row['max_pos'] is not None else 0) + 1
+
+                cursor.execute(
+                    '''INSERT INTO tasks (board_id, task, due_date, notes, position)
+                       VALUES (%s, %s, %s, %s, %s) RETURNING id''',
+                    (board_id, task, due_date, notes, position)
+                )
+                _tid = cursor.fetchone()['id']
+                conn.commit()
+                logger.info(f"Added task with archiving to board {board_id}: id={_tid}")
+                return True
     
     def update_task(self, board_id, user_id, task_idx, new_task, new_date, new_notes):
         """
