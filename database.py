@@ -121,7 +121,10 @@ class Database:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_position ON tasks(board_id, position)')
                     logger.info("Created index: idx_tasks_board_position") 
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_board_completed_position ON tasks(board_id, is_completed, position)')
-                    logger.info("Created index: idx_tasks_board_completed_position")
+                    logger.info("Created index: idx_tasks_board_completed_position") 
+                    # Index to support archiving selection query (board, completed flag, ordering)
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_archive_select ON tasks(board_id, is_completed, completed_on, created_at)')
+                    logger.info("Created index: idx_tasks_archive_select")
                     
                     # Archive performance indexes
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_archived_tasks_user_archived ON archived_tasks(user_id, archived_on)')
@@ -576,6 +579,42 @@ class Database:
                     logger.info(f"Completed task {task['id']} in board {board_id}")
                 else:
                     logger.error(f"Task at index {task_idx} not found in board {board_id}")
+
+    def complete_task_and_archive(self, board_id, user_id, task_idx, archive_manager):
+        """Atomically complete a task and archive overflow tasks.
+
+        Completes the task at index in the active list for the board and then
+        archives oldest completed tasks until total <= MAX_TASKS_PER_BOARD.
+        """
+        with self.get_connection() as conn:
+            with conn.cursor() as cursor:
+                # Complete task (same selection logic as complete_task)
+                cursor.execute(
+                    '''SELECT t.id FROM tasks t 
+                       JOIN boards b ON t.board_id = b.id 
+                       WHERE b.id = %s AND b.user_id = %s AND t.is_completed = FALSE 
+                       ORDER BY t.position, t.created_at 
+                       LIMIT 1 OFFSET %s''',
+                    (board_id, user_id, task_idx)
+                )
+                task = cursor.fetchone()
+
+                if not task:
+                    return 0
+
+                cursor.execute(
+                    'UPDATE tasks SET is_completed = TRUE, completed_on = %s WHERE id = %s',
+                    (datetime.now().strftime("%Y-%m-%d"), task['id'])
+                )
+
+                # Archive overflow within the same transaction
+                archived_count = 0
+                try:
+                    archived_count = archive_manager.archive_overflow_tasks(board_id, user_id, conn=conn)
+                finally:
+                    conn.commit()
+
+                return archived_count
     
     def complete_task_with_archiving(self, board_id, user_id, task_idx, archive_manager):
         """
