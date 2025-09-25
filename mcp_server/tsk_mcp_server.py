@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import functools
+import io
+import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict, List
+from datetime import datetime, date
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import anyio
 from mcp.server.fastmcp import Context, FastMCP
@@ -75,6 +78,102 @@ def _validate_due_date(value: str) -> str:
     except ValueError as exc:
         raise ValueError("Due date must be YYYY-MM-DD.") from exc
     return parsed.date().isoformat()
+
+
+def _parse_date(value: Any) -> Optional[date]:
+    """Best-effort parsing of a YYYY-MM-DD string into a date object."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+    return None
+
+
+def _format_board_ascii(board_payload: Dict[str, Any]) -> str:
+    """Render a lightweight ASCII representation of a board."""
+    lines: List[str] = [f"Board: {board_payload.get('name', 'Unknown')}".strip(), "", "Active Tasks:"]
+    active_tasks = board_payload.get("active", []) or []
+    completed_tasks = board_payload.get("completed", []) or []
+
+    if not active_tasks:
+        lines.append("  (none)")
+    else:
+        for task in active_tasks:
+            due = task.get("date") or "—"
+            notes = task.get("notes") or ""
+            summary = f"  • [{due}] {task.get('task', 'Untitled')}"
+            if notes:
+                summary += f" — {notes}"
+            lines.append(summary)
+
+    lines.extend(["", "Completed Tasks:"])
+    if not completed_tasks:
+        lines.append("  (none)")
+    else:
+        for task in completed_tasks[:10]:
+            completed_on = task.get("completed_on") or "—"
+            lines.append(f"  • [{completed_on}] {task.get('task', 'Untitled')}")
+        if len(completed_tasks) > 10:
+            lines.append(f"  … {len(completed_tasks) - 10} more completed tasks")
+
+    return "\n".join(lines)
+
+
+def _build_board_csv(board_payload: Dict[str, Any]) -> str:
+    """Generate a CSV string representing board tasks."""
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["id", "status", "task", "due_date", "notes", "completed_on"])
+
+    for task in board_payload.get("active", []) or []:
+        writer.writerow([task.get("id"), "active", task.get("task"), task.get("date"), task.get("notes", ""), ""])
+    for task in board_payload.get("completed", []) or []:
+        writer.writerow([task.get("id"), "completed", task.get("task"), task.get("date"), task.get("notes", ""), task.get("completed_on", "")])
+
+    return output.getvalue()
+
+
+def _summarize_board(board_payload: Dict[str, Any]) -> str:
+    """Create a human-readable summary of board health."""
+    active = board_payload.get("active", []) or []
+    completed = board_payload.get("completed", []) or []
+    total = len(active) + len(completed)
+    today = datetime.now().date()
+    overdue = [task for task in active if (_parse_date(task.get("date")) or today) < today]
+    upcoming = [task for task in active if 0 <= (( _parse_date(task.get("date")) or today) - today).days <= 7]
+
+    lines = [
+        f"Board '{board_payload.get('name', 'Unknown')}' overview:",
+        f"- Active tasks: {len(active)}",
+        f"- Completed tasks: {len(completed)}",
+        f"- Total tasks (active + completed): {total}",
+        f"- Overdue tasks: {len(overdue)}",
+        f"- Due within 7 days: {len(upcoming)}",
+    ]
+
+    if active:
+        next_due = min(active, key=lambda task: _parse_date(task.get("date")) or today)
+        next_due_date = next_due.get("date", "N/A")
+        lines.append(f"- Next due task: '{next_due.get('task', 'Untitled')}' on {next_due_date}")
+
+    return "\n".join(lines)
+
+
+def _normalize_date_output(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.strftime("%Y-%m-%d")
+    return str(value)
 
 
 server = FastMCP(
@@ -224,6 +323,115 @@ async def create_board(ctx: Context, name: str) -> Dict[str, Any]:
 
 
 @server.tool()
+async def delete_board(ctx: Context, board_id: str) -> Dict[str, Any]:
+    """Delete a board when more than one board exists."""
+    user_id, username = _require_user(ctx)
+    services = get_services()
+
+    def _delete() -> Dict[str, Any]:
+        with services.db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    'SELECT id FROM boards WHERE id = %s AND user_id = %s',
+                    (board_id, user_id),
+                )
+                if cursor.fetchone() is None:
+                    raise ValueError("Board not found for the current user.")
+
+                cursor.execute('SELECT COUNT(*) AS count FROM boards WHERE user_id = %s', (user_id,))
+                if cursor.fetchone()["count"] <= 1:
+                    raise ValueError("Cannot delete the last remaining board.")
+
+                cursor.execute('DELETE FROM boards WHERE id = %s AND user_id = %s', (board_id, user_id))
+                conn.commit()
+
+        return {"status": "deleted", "board_id": board_id}
+
+    result = await _run_db(_delete)
+    await ctx.info(f"Deleted board {board_id} for {username}")
+    return result
+
+
+@server.tool()
+async def update_board_name(ctx: Context, board_id: str, name: str) -> Dict[str, Any]:
+    """Rename a board."""
+    new_name = name.strip()
+    if not new_name:
+        raise ValueError("Board name cannot be empty.")
+    user_id, username = _require_user(ctx)
+    services = get_services()
+
+    def _rename() -> Dict[str, Any]:
+        with services.db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    'SELECT id FROM boards WHERE id = %s AND user_id = %s',
+                    (board_id, user_id),
+                )
+                if cursor.fetchone() is None:
+                    raise ValueError("Board not found for the current user.")
+
+                cursor.execute(
+                    'UPDATE boards SET header = %s WHERE id = %s AND user_id = %s',
+                    (new_name, board_id, user_id),
+                )
+                conn.commit()
+
+        return {"status": "renamed", "board_id": board_id, "name": new_name}
+
+    result = await _run_db(_rename)
+    await ctx.info(f"Renamed board {board_id} to '{new_name}' for {username}")
+    return result
+
+
+@server.tool()
+async def get_board_stats(ctx: Context, board_id: str) -> Dict[str, Any]:
+    """Return aggregate statistics for a board."""
+    user_id, _ = _require_user(ctx)
+    services = get_services()
+    boards = await _run_db(services.db.get_user_boards, user_id)
+    board = boards.get(board_id)
+    if not board:
+        raise ValueError("Board not found for the current user.")
+
+    active = board.get("active", []) or []
+    completed = board.get("completed", []) or []
+    today = datetime.now().date()
+
+    overdue = [task for task in active if (_parse_date(task.get("date")) or today) < today]
+    due_soon = [
+        task
+        for task in active
+        if 0 <= ((_parse_date(task.get("date")) or today) - today).days <= 7
+    ]
+
+    first_completed = min(
+        (task for task in completed if task.get("completed_on")),
+        default=None,
+        key=lambda task: _parse_date(task.get("completed_on")) or today,
+    )
+    most_recent_completion = max(
+        (task for task in completed if task.get("completed_on")),
+        default=None,
+        key=lambda task: _parse_date(task.get("completed_on")) or today,
+    )
+
+    stats = {
+        "board_id": board_id,
+        "name": board.get("header"),
+        "active_count": len(active),
+        "completed_count": len(completed),
+        "total_count": len(active) + len(completed),
+        "overdue_count": len(overdue),
+        "due_within_7_days": len(due_soon),
+        "oldest_completion": first_completed.get("completed_on") if first_completed else None,
+        "latest_completion": most_recent_completion.get("completed_on") if most_recent_completion else None,
+    }
+
+    return stats
+
+
+@server.tool()
 async def list_archived_tasks(ctx: Context, limit: int = 20, offset: int = 0) -> Dict[str, Any]:
     """Return archived tasks for the authenticated user."""
     user_id, _ = _require_user(ctx)
@@ -246,6 +454,415 @@ async def list_archived_tasks(ctx: Context, limit: int = 20, offset: int = 0) ->
         return {"items": payload, "limit": limit, "offset": offset}
 
     return await _run_db(_list)
+
+
+@server.tool()
+async def update_task(
+    ctx: Context,
+    task_id: int,
+    new_task: Optional[str] = None,
+    new_due_date: Optional[str] = None,
+    new_notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Update the core fields for a task owned by the user."""
+    if not any(value is not None for value in (new_task, new_due_date, new_notes)):
+        raise ValueError("Provide at least one field to update.")
+
+    updates: Dict[str, Any] = {}
+    if new_task is not None:
+        stripped = new_task.strip()
+        if not stripped:
+            raise ValueError("Task description cannot be empty.")
+        updates["task"] = stripped
+    if new_due_date is not None:
+        updates["due_date"] = _validate_due_date(new_due_date)
+    if new_notes is not None:
+        updates["notes"] = new_notes.strip()
+
+    user_id, username = _require_user(ctx)
+    services = get_services()
+
+    def _update() -> Dict[str, Any]:
+        with services.db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    '''SELECT t.id, t.board_id, t.task, t.due_date, t.notes, t.is_completed, t.completed_on
+                       FROM tasks t
+                       JOIN boards b ON t.board_id = b.id
+                       WHERE t.id = %s AND b.user_id = %s''',
+                    (task_id, user_id),
+                )
+                original = cursor.fetchone()
+                if original is None:
+                    raise ValueError("Task not found for the current user.")
+
+                if updates:
+                    set_clause = ", ".join(f"{column} = %s" for column in updates.keys())
+                    cursor.execute(
+                        f"UPDATE tasks SET {set_clause} WHERE id = %s",
+                        (*updates.values(), task_id),
+                    )
+                conn.commit()
+
+                cursor.execute(
+                    'SELECT id, board_id, task, due_date, notes, is_completed, completed_on FROM tasks WHERE id = %s',
+                    (task_id,),
+                )
+                refreshed = cursor.fetchone()
+
+        return {
+            "status": "updated",
+            "task": {
+                "id": refreshed["id"],
+                "board_id": refreshed["board_id"],
+                "task": refreshed["task"],
+                "due_date": _normalize_date_output(refreshed["due_date"]),
+                "notes": refreshed.get("notes", ""),
+                "is_completed": refreshed["is_completed"],
+                "completed_on": _normalize_date_output(refreshed.get("completed_on")),
+            },
+        }
+
+    result = await _run_db(_update)
+    await ctx.info(f"Updated task {task_id} for {username}")
+    return result
+
+
+@server.tool()
+async def delete_task(ctx: Context, task_id: int) -> Dict[str, Any]:
+    """Delete a task regardless of completion state."""
+    user_id, username = _require_user(ctx)
+    services = get_services()
+
+    def _delete() -> Dict[str, Any]:
+        with services.db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    '''SELECT t.id, t.board_id
+                       FROM tasks t
+                       JOIN boards b ON t.board_id = b.id
+                       WHERE t.id = %s AND b.user_id = %s''',
+                    (task_id, user_id),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise ValueError("Task not found for the current user.")
+
+                cursor.execute('DELETE FROM tasks WHERE id = %s', (task_id,))
+                conn.commit()
+
+        return {"status": "deleted", "task_id": task_id, "board_id": row["board_id"]}
+
+    result = await _run_db(_delete)
+    await ctx.info(f"Deleted task {task_id} for {username}")
+    return result
+
+
+@server.tool()
+async def reorder_tasks(
+    ctx: Context,
+    board_id: str,
+    ordered_task_ids: Sequence[int],
+    section: str = "active",
+) -> Dict[str, Any]:
+    """Reorder tasks within a board section (active or completed)."""
+    if section not in {"active", "completed"}:
+        raise ValueError("Section must be 'active' or 'completed'.")
+    if not ordered_task_ids:
+        raise ValueError("ordered_task_ids cannot be empty.")
+
+    user_id, username = _require_user(ctx)
+    services = get_services()
+    is_completed = section == "completed"
+
+    def _reorder() -> Dict[str, Any]:
+        with services.db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    'SELECT id FROM boards WHERE id = %s AND user_id = %s',
+                    (board_id, user_id),
+                )
+                if cursor.fetchone() is None:
+                    raise ValueError("Board not found for the current user.")
+
+                cursor.execute(
+                    '''SELECT t.id
+                       FROM tasks t
+                       JOIN boards b ON t.board_id = b.id
+                       WHERE t.board_id = %s AND b.user_id = %s AND t.is_completed = %s
+                       ORDER BY t.position, t.created_at''',
+                    (board_id, user_id, is_completed),
+                )
+                existing_ids = [row["id"] for row in cursor.fetchall()]
+
+                if set(existing_ids) != set(int(tid) for tid in ordered_task_ids):
+                    raise ValueError("Ordered IDs must match the current set of tasks in that section.")
+
+                for position, task_id in enumerate(ordered_task_ids, start=1):
+                    cursor.execute('UPDATE tasks SET position = %s WHERE id = %s', (position, task_id))
+
+                conn.commit()
+
+        return {"status": "reordered", "board_id": board_id, "section": section, "count": len(ordered_task_ids)}
+
+    result = await _run_db(_reorder)
+    await ctx.info(f"Reordered {len(ordered_task_ids)} {section} tasks on board {board_id} for {username}")
+    return result
+
+
+@server.tool()
+async def restore_archived_task(ctx: Context, archived_task_id: int) -> Dict[str, Any]:
+    """Restore an archived task back into its original board as an active task."""
+    user_id, username = _require_user(ctx)
+    services = get_services()
+
+    def _restore() -> Dict[str, Any]:
+        with services.db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    'SELECT * FROM archived_tasks WHERE id = %s AND user_id = %s',
+                    (archived_task_id, user_id),
+                )
+                archived = cursor.fetchone()
+                if archived is None:
+                    raise ValueError("Archived task not found for the current user.")
+
+                board_id = archived["board_id"]
+
+                cursor.execute('SELECT id FROM boards WHERE id = %s AND user_id = %s', (board_id, user_id))
+                if cursor.fetchone() is None:
+                    raise ValueError("The archived task references a board that no longer exists.")
+
+                cursor.execute(
+                    'SELECT COUNT(*) AS count FROM tasks WHERE board_id = %s AND is_completed = FALSE',
+                    (board_id,),
+                )
+                if cursor.fetchone()["count"] >= ArchiveManager.MAX_TASKS_PER_BOARD:
+                    raise ValueError("Board already has the maximum number of active tasks.")
+
+                cursor.execute(
+                    'SELECT COALESCE(MAX(position), 0) AS pos FROM tasks WHERE board_id = %s AND is_completed = FALSE',
+                    (board_id,),
+                )
+                next_position = (cursor.fetchone()["pos"] or 0) + 1
+
+                cursor.execute(
+                    '''INSERT INTO tasks (board_id, task, due_date, notes, position, is_completed, completed_on)
+                       VALUES (%s, %s, %s, %s, %s, FALSE, NULL)
+                       RETURNING id''',
+                    (
+                        board_id,
+                        archived.get("task"),
+                        archived.get("due_date"),
+                        archived.get("notes", ""),
+                        next_position,
+                    ),
+                )
+                new_task_id = cursor.fetchone()["id"]
+
+                cursor.execute('DELETE FROM archived_tasks WHERE id = %s', (archived_task_id,))
+                conn.commit()
+
+        return {"status": "restored", "task_id": new_task_id, "board_id": board_id}
+
+    result = await _run_db(_restore)
+    await ctx.info(f"Restored archived task {archived_task_id} for {username}")
+    return result
+
+
+@server.tool()
+async def bulk_complete_tasks(ctx: Context, board_id: str, task_ids: Sequence[int]) -> Dict[str, Any]:
+    """Complete multiple tasks in a single request."""
+    if not task_ids:
+        raise ValueError("task_ids cannot be empty.")
+
+    user_id, username = _require_user(ctx)
+    services = get_services()
+
+    def _bulk() -> Dict[str, Any]:
+        completed = 0
+        skipped: List[int] = []
+        archived_total = 0
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        with services.db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute('SELECT id FROM boards WHERE id = %s AND user_id = %s', (board_id, user_id))
+                if cursor.fetchone() is None:
+                    raise ValueError("Board not found for the current user.")
+
+                for task_id in task_ids:
+                    cursor.execute(
+                        '''SELECT t.id FROM tasks t
+                           JOIN boards b ON t.board_id = b.id
+                           WHERE t.id = %s AND t.board_id = %s AND b.user_id = %s AND t.is_completed = FALSE''',
+                        (task_id, board_id, user_id),
+                    )
+                    if cursor.fetchone() is None:
+                        skipped.append(int(task_id))
+                        continue
+
+                    cursor.execute(
+                        'UPDATE tasks SET is_completed = TRUE, completed_on = %s WHERE id = %s',
+                        (today_str, task_id),
+                    )
+                    completed += 1
+
+                archived_total = services.archive.archive_overflow_tasks(board_id, user_id, conn=conn)
+                conn.commit()
+
+        return {
+            "status": "completed",
+            "board_id": board_id,
+            "requested": len(task_ids),
+            "completed": completed,
+            "archived": archived_total,
+            "skipped": skipped,
+        }
+
+    result = await _run_db(_bulk)
+    await ctx.info(
+        f"Bulk-completed {result['completed']} tasks on board {board_id} for {username}; skipped {len(result['skipped'])}."
+    )
+    return result
+
+
+@server.tool()
+async def bulk_delete_tasks(ctx: Context, board_id: str, task_ids: Sequence[int]) -> Dict[str, Any]:
+    """Delete multiple tasks from a board."""
+    if not task_ids:
+        raise ValueError("task_ids cannot be empty.")
+
+    user_id, username = _require_user(ctx)
+    services = get_services()
+
+    def _bulk_delete() -> Dict[str, Any]:
+        deleted = 0
+        skipped: List[int] = []
+
+        with services.db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute('SELECT id FROM boards WHERE id = %s AND user_id = %s', (board_id, user_id))
+                if cursor.fetchone() is None:
+                    raise ValueError("Board not found for the current user.")
+
+                for task_id in task_ids:
+                    cursor.execute(
+                        '''SELECT t.id FROM tasks t
+                           JOIN boards b ON t.board_id = b.id
+                           WHERE t.id = %s AND t.board_id = %s AND b.user_id = %s''',
+                        (task_id, board_id, user_id),
+                    )
+                    if cursor.fetchone() is None:
+                        skipped.append(int(task_id))
+                        continue
+
+                    cursor.execute('DELETE FROM tasks WHERE id = %s', (task_id,))
+                    deleted += 1
+
+                conn.commit()
+
+        return {
+            "status": "deleted",
+            "board_id": board_id,
+            "requested": len(task_ids),
+            "deleted": deleted,
+            "skipped": skipped,
+        }
+
+    result = await _run_db(_bulk_delete)
+    await ctx.info(
+        f"Bulk-deleted {result['deleted']} tasks on board {board_id} for {username}; skipped {len(result['skipped'])}."
+    )
+    return result
+
+
+@server.tool()
+async def move_task_between_boards(ctx: Context, task_id: int, target_board_id: str) -> Dict[str, Any]:
+    """Move a task to another board, preserving completion state."""
+    user_id, username = _require_user(ctx)
+    services = get_services()
+
+    def _move() -> Dict[str, Any]:
+        with services.db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    '''SELECT t.id, t.board_id, t.is_completed
+                       FROM tasks t
+                       JOIN boards b ON t.board_id = b.id
+                       WHERE t.id = %s AND b.user_id = %s''',
+                    (task_id, user_id),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise ValueError("Task not found for the current user.")
+
+                source_board = row["board_id"]
+                if source_board == target_board_id:
+                    return {"status": "unchanged", "task_id": task_id, "board_id": target_board_id}
+
+                cursor.execute('SELECT id FROM boards WHERE id = %s AND user_id = %s', (target_board_id, user_id))
+                if cursor.fetchone() is None:
+                    raise ValueError("Target board not found for the current user.")
+
+                if not row["is_completed"]:
+                    cursor.execute(
+                        'SELECT COUNT(*) AS count FROM tasks WHERE board_id = %s AND is_completed = FALSE',
+                        (target_board_id,),
+                    )
+                    if cursor.fetchone()["count"] >= 10:
+                        raise ValueError("Target board already has 10 active tasks.")
+
+                cursor.execute(
+                    'SELECT COALESCE(MAX(position), 0) AS pos FROM tasks WHERE board_id = %s AND is_completed = %s',
+                    (target_board_id, row["is_completed"]),
+                )
+                next_position = (cursor.fetchone()["pos"] or 0) + 1
+
+                cursor.execute(
+                    'UPDATE tasks SET board_id = %s, position = %s WHERE id = %s',
+                    (target_board_id, next_position, task_id),
+                )
+                conn.commit()
+
+        return {
+            "status": "moved",
+            "task_id": task_id,
+            "from": source_board,
+            "to": target_board_id,
+            "is_completed": row["is_completed"],
+        }
+
+    result = await _run_db(_move)
+    await ctx.info(
+        f"Moved task {task_id} from board {result['from']} to {result['to']} for {username}"
+    )
+    return result
+
+
+@server.tool()
+async def generate_board_screenshot(ctx: Context, board_id: str) -> Dict[str, Any]:
+    """Produce an ASCII representation of a board."""
+    payload = await list_tasks(ctx=ctx, board_id=board_id, include_completed=True)
+    ascii_art = _format_board_ascii(payload)
+    return {"board_id": board_id, "ascii": ascii_art}
+
+
+@server.tool()
+async def export_board_data(ctx: Context, board_id: str) -> Dict[str, Any]:
+    """Export board data as JSON and CSV strings."""
+    payload = await list_tasks(ctx=ctx, board_id=board_id, include_completed=True)
+    json_data = json.dumps(payload, indent=2, default=str)
+    csv_data = _build_board_csv(payload)
+    return {"board_id": board_id, "json": json_data, "csv": csv_data}
+
+
+@server.tool()
+async def generate_board_summary(ctx: Context, board_id: str) -> Dict[str, Any]:
+    """Produce a textual summary describing board health."""
+    payload = await list_tasks(ctx=ctx, board_id=board_id, include_completed=True)
+    summary = _summarize_board(payload)
+    return {"board_id": board_id, "summary": summary}
 
 
 def main() -> None:

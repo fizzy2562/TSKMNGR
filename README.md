@@ -78,6 +78,45 @@ python app.py
 4. **Track Progress**: Mark tasks complete and monitor your productivity
 5. **Manage Workflow**: Edit, complete, or remove tasks as needed
 
+## MCP Server Integration
+
+This project now ships with a Model Context Protocol (MCP) server that reuses the core database and archiving logic so you can manage tasks from an MCP-compatible client (e.g. Claude Desktop).
+
+1. Create a virtual environment and install dependencies:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+2. Export the usual environment variables (`DATABASE_URL`, optional `SECRET_KEY`).
+3. Launch the server with your preferred transport (stdio works best for Claude Code MCP):
+   ```bash
+   python -m mcp_server.tsk_mcp_server --transport stdio
+   ```
+   Pass `--transport sse --host 0.0.0.0 --port 8765` to expose an HTTP/SSE endpoint instead.
+4. Connect from your MCP client and call the available tools:
+   - `login(username, password)` – authenticate and persist the session
+   - `current_user()` / `logout()` – inspect or clear the active session
+   - `list_boards()` – view boards with active/completed counts
+   - `create_board(name)` / `delete_board(board_id)` / `update_board_name(board_id, name)` – manage board lifecycle
+   - `get_board_stats(board_id)` – inspect aggregate metrics for a board
+   - `list_tasks(board_id, include_completed=True)` – fetch tasks for a board
+   - `add_task(board_id, task, due_date, notes=None)` – create a task (YYYY-MM-DD dates)
+   - `update_task(task_id, new_task=None, new_due_date=None, new_notes=None)` – edit core task fields
+   - `delete_task(task_id)` – remove a task outright
+   - `complete_task(board_id, task_id)` / `bulk_complete_tasks(board_id, task_ids)` – finish tasks and trigger archiving if needed
+   - `bulk_delete_tasks(board_id, task_ids)` – delete many tasks at once
+   - `reorder_tasks(board_id, ordered_task_ids, section="active")` – control task ordering per column
+   - `move_task_between_boards(task_id, target_board_id)` – relocate work between boards
+   - `restore_archived_task(archived_task_id)` – bring archived tasks back as active work
+   - `list_archived_tasks(limit=20, offset=0)` – page through archived work
+   - `generate_board_screenshot(board_id)` – get an ASCII snapshot of the board
+   - `export_board_data(board_id)` – download JSON/CSV exports for sharing
+   - `generate_board_summary(board_id)` – produce a human-readable status recap
+
+The MCP server enforces the same board/task limits as the Flask app and surfaces informative errors when limits are hit.
+
+
 ## Database Schema
 
 - **Users**: User accounts with authentication
