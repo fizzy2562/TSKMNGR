@@ -7,6 +7,9 @@ import secrets
 import random
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
+
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Import our modules
 from database import Database
@@ -18,10 +21,13 @@ from markupsafe import escape
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+_BASE_DIR = Path(__file__).resolve().parent
+
+
 def get_random_task_limit_message():
     """Read random message from task_limit_messages.txt file."""
     try:
-        with open('task_limit_messages.txt', 'r', encoding='utf-8') as f:
+        with open(_BASE_DIR / "task_limit_messages.txt", "r", encoding="utf-8") as f:
             messages = [line.strip() for line in f.readlines() if line.strip()]
         return random.choice(messages) if messages else "Task limit reached (10/10). Complete tasks to add new ones."
     except FileNotFoundError:
@@ -30,15 +36,36 @@ def get_random_task_limit_message():
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
+if os.environ.get("VERCEL"):
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1
+    )
+
 # Session configuration
 app.config['SESSION_PERMANENT'] = False
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+if os.environ.get("VERCEL_ENV") in ("production", "preview"):
+    app.config["SESSION_COOKIE_SECURE"] = True
 
-# Initialize database and archiving
-db = Database()
-archive_manager = ArchiveManager(db)
+_db = None
+_archive_manager = None
+
+
+def get_db() -> Database:
+    global _db
+    if _db is None:
+        _db = Database()
+    return _db
+
+
+def get_archive_manager() -> ArchiveManager:
+    global _archive_manager
+    if _archive_manager is None:
+        _archive_manager = ArchiveManager(get_db())
+    return _archive_manager
+
 
 # Helper functions
 def linkify(text):
@@ -85,7 +112,7 @@ def login():
         username = request.form.get('username')
         password = request.form.get('password')
         
-        user = db.authenticate_user(username, password)
+        user = get_db().authenticate_user(username, password)
         if user:
             session['user_id'] = user['id']
             session['username'] = user['username']
@@ -120,7 +147,7 @@ def register():
             return render_template_string(REGISTER_TEMPLATE, error='Passwords do not match')
         
         # Create new user
-        user_id = db.create_user(username, password)
+        user_id = get_db().create_user(username, password)
         
         if user_id:
             # Auto-login after registration
@@ -145,7 +172,7 @@ def dashboard():
     username = session.get('username')
     
     # Get boards from database
-    boards = db.get_user_boards(user_id)
+    boards = get_db().get_user_boards(user_id)
     
     # Safety net: archive overflow if any board exceeds total cap
     try:
@@ -155,12 +182,12 @@ def dashboard():
             total = len(board.get('active', [])) + len(board.get('completed', []))
             if total > max_total:
                 try:
-                    archive_manager.archive_overflow_tasks(b_id, user_id)
+                    get_archive_manager().archive_overflow_tasks(b_id, user_id)
                     archived_any = True
                 except Exception as e:
                     logger.error(f"Safety net archiving failed for board {b_id}: {e}")
         if archived_any:
-            boards = db.get_user_boards(user_id)
+            boards = get_db().get_user_boards(user_id)
     except Exception as e:
         logger.error(f"Dashboard safety net error: {e}")
     
@@ -185,10 +212,10 @@ def dashboard():
 def add_board():
     user_id = session.get('user_id')
     
-    if db.count_user_boards(user_id) < 4:
+    if get_db().count_user_boards(user_id) < 4:
         new_board_id = str(uuid.uuid4())
-        board_count = db.count_user_boards(user_id)
-        db.create_board(user_id, f"Board {board_count + 1}", new_board_id)
+        board_count = get_db().count_user_boards(user_id)
+        get_db().create_board(user_id, f"Board {board_count + 1}", new_board_id)
     
     return redirect(url_for("dashboard"))
 
@@ -196,7 +223,7 @@ def add_board():
 @login_required
 def remove_board(board_id):
     user_id = session.get('user_id')
-    db.delete_board(board_id, user_id)
+    get_db().delete_board(board_id, user_id)
     return redirect(url_for("dashboard"))
 
 @app.route("/edit_header/<board_id>", methods=["POST"])
@@ -206,7 +233,7 @@ def edit_header(board_id):
     new_header = request.form.get("header_text", "").strip()
     
     if new_header:
-        db.update_board_header(board_id, user_id, new_header)
+        get_db().update_board_header(board_id, user_id, new_header)
     
     return redirect(url_for("dashboard"))
 
@@ -220,7 +247,9 @@ def add_task(board_id):
     
     if task and due_date:
         try:
-            ok = db.add_task_with_archiving(board_id, user_id, task, due_date, notes, archive_manager)
+            ok = get_db().add_task_with_archiving(
+                board_id, user_id, task, due_date, notes, get_archive_manager()
+            )
             if not ok:
                 logger.warning(f"Add task blocked due to limits for board {board_id}")
         except Exception as e:
@@ -237,7 +266,7 @@ def edit_task(board_id, task_idx):
     new_notes = request.form.get("edit_notes", "").strip()
     
     if new_task and new_date:
-        db.update_task(board_id, user_id, task_idx, new_task, new_date, new_notes)
+        get_db().update_task(board_id, user_id, task_idx, new_task, new_date, new_notes)
     
     return redirect(url_for("dashboard"))
 
@@ -247,13 +276,15 @@ def complete(board_id, task_idx):
     user_id = session.get('user_id')
     # Complete task and handle archiving atomically
     try:
-        archived_count = db.complete_task_with_archiving(board_id, user_id, task_idx, archive_manager)
+        archived_count = get_db().complete_task_with_archiving(
+            board_id, user_id, task_idx, get_archive_manager()
+        )
         if archived_count > 0:
             logger.info(f"Task completion triggered archiving of {archived_count} tasks from board {board_id}")
     except Exception as e:
         logger.error(f"Error during atomic task completion and archiving: {e}")
         # Fall back to non-atomic completion if atomic method fails
-        db.complete_task(board_id, user_id, task_idx)
+        get_db().complete_task(board_id, user_id, task_idx)
     
     return redirect(url_for("dashboard"))
 
@@ -261,7 +292,7 @@ def complete(board_id, task_idx):
 @login_required
 def uncomplete(board_id, task_id):
     user_id = session.get('user_id')
-    db.uncomplete_task(board_id, user_id, task_id)
+    get_db().uncomplete_task(board_id, user_id, task_id)
     return redirect(url_for("dashboard"))
 
 @app.route("/archived")
@@ -278,8 +309,10 @@ def archived():
     offset = (page - 1) * per_page
     
     # Get archived tasks and total count
-    archived_tasks = archive_manager.get_archived_tasks(user_id, limit=per_page, offset=offset)
-    total_count = archive_manager.get_archived_tasks_count(user_id)
+    archived_tasks = get_archive_manager().get_archived_tasks(
+        user_id, limit=per_page, offset=offset
+    )
+    total_count = get_archive_manager().get_archived_tasks_count(user_id)
     
     # Calculate pagination info
     total_pages = (total_count + per_page - 1) // per_page  # Ceiling division
